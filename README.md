@@ -46,6 +46,13 @@ Opções úteis do coletor: `--anos 2025 2026` (anos da cota), `--eleicoes 2022 
 3. Link para divulgar: `https://<usuario>-radar-de-gastos.hf.space`.
 Para atualizar o site: rode `Atualizar Radar Brasil.bat` (ou o de MS) e depois `Publicar Radar.bat`.
 
+## Novidades, votações e municípios
+
+- **📰 Novidades**: o que entrou desde a última atualização (notas, contratos, alertas novos), lançamentos mais recentes,
+  votações nominais recentes (Câmara e Senado, com o voto de cada parlamentar) e manchetes do Google Notícias.
+- **Ficha → O que fez no mandato**: como votou (filtro só PECs e busca por tema), projetos apresentados e notícias.
+- **Municípios**: `--municipios-uf MS` traz os contratos PNCP de todos os municípios da UF; `--capitais` as 27 capitais.
+
 ## Ficha do político
 
 Na aba Políticos (separada dos órgãos municipais), ao clicar num nome aparece a ficha: foto, nome civil, idade, partido, quem representa, mandato (início, fim, quanto já cumpriu), gasto no mandato, e-mail, telefone, gabinete, redes sociais (Câmara/Senado/TSE) e uma mensagem pronta para cobrar por e-mail ou WhatsApp.
