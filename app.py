@@ -292,7 +292,7 @@ if ufs: f = f[f["uf"].isin(ufs)]
 if muns: f = f[f["municipio"].isin(muns)]
 if busca: f = f[f["nome"].str.contains(busca, case=False, na=False)]
 
-aba_rank, aba_imp, aba1, aba2, aba3 = st.tabs(["🏆 Ranking de gastos", "🧾 Impostômetro", "Políticos", "Todos os alertas", "Fornecedor (CNPJ/CPF)"])
+aba_rank, aba_nov, aba_imp, aba1, aba2, aba3 = st.tabs(["🏆 Ranking de gastos", "📰 Novidades", "🧾 Impostômetro", "Políticos", "Todos os alertas", "Fornecedor (CNPJ/CPF)"])
 
 AZUL, VERMELHO = "#3987e5", "#e34948"
 
@@ -390,6 +390,10 @@ with aba_rank:
                 tooltip=[alt.Tooltip("rot:N", title="Mês"), alt.Tooltip("txt:N", title="Gasto")]
             ).properties(height=260).configure_view(strokeWidth=0).configure_axis(labelColor="#8a8a86")
             st.altair_chart(ch, width="stretch")
+
+with aba_nov:
+    from novidades_ui import render as _render_novidades
+    _render_novidades(con, f, ufs, muns, CURTO, BRL, tabela_notas, atualizado_em())
 
 with aba_imp:
     from impostometro_ui import render as _render_impostometro
