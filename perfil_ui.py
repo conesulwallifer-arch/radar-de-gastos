@@ -119,7 +119,7 @@ def perfil_camara(dep_id: str, nome: str = "", uf: str = "") -> dict | None:
     leg = us.get("idLegislatura") or (legs[-1] if legs else None)
     ini = dt.date(1795 + 4 * int(leg), 2, 1) if leg else None
     return {
-        "fonte": "Câmara dos Deputados",
+        "fonte": "Câmara dos Deputados", "casa": "Câmara", "id_casa": str(dep_id),
         "foto": us.get("urlFoto"),
         "nome_civil": d.get("nomeCivil"),
         "nome": us.get("nomeEleitoral") or us.get("nome"),
@@ -175,7 +175,7 @@ def perfil_senado(cod: str, nome: str = "") -> dict | None:
     hoje = dt.date.today()
     atual = next((m for m in reversed(mandatos) if m[0] <= hoje), mandatos[-1] if mandatos else (None, None, ""))
     return {
-        "fonte": "Senado Federal",
+        "fonte": "Senado Federal", "casa": "Senado", "id_casa": str(cod),
         "foto": idp.get("UrlFotoParlamentar"),
         "nome_civil": idp.get("NomeCompletoParlamentar"), "nome": idp.get("NomeParlamentar"),
         "partido": idp.get("SiglaPartidoParlamentar"), "uf": idp.get("UfParlamentar"),
@@ -392,6 +392,17 @@ def ficha(p, con, g: pd.DataFrame, a: pd.DataFrame, BRL, CURTO):
         with st.expander("Histórico de mandatos e candidaturas"):
             st.markdown("\n".join(f"- {x}" for x in info["outros_mandatos"]))
 
+    # ---- atuação: votos, projetos e notícias
+    st.markdown("#### 🏛️ O que fez no mandato")
+    t_voto, t_proj, t_news = st.tabs(["🗳️ Como votou", "📜 Projetos apresentados", "📰 Notícias"])
+    with t_voto:
+        atuacao_votos(con, info)
+    with t_proj:
+        projetos(info)
+    with t_news:
+        import noticias
+        noticias.mostrar(f'"{info.get("nome") or p["nome"]}"', 12)
+
     # ---- contatos e redes
     st.markdown("#### 📣 Onde cobrar")
     cols = st.columns(3)
@@ -431,3 +442,79 @@ def ficha(p, con, g: pd.DataFrame, a: pd.DataFrame, BRL, CURTO):
             b1.link_button("📧 Abrir no e-mail", f"mailto:{info['email']}?subject={up.quote('Pedido de esclarecimento sobre gastos')}&body={up.quote(texto)}", width="stretch")
         b2.link_button("💬 Compartilhar no WhatsApp", f"https://wa.me/?text={up.quote(texto)}", width="stretch")
         st.caption("Alertas são indícios, não prova. Peça explicação antes de acusar publicamente.")
+
+
+# --------------------------------------------------------------------- atuação
+def atuacao_votos(con, info: dict):
+    casa, pid = info.get("casa"), info.get("id_casa")
+    if not casa or not pid:
+        st.caption("Votações nominais existem só para deputados federais e senadores. Para vereadores, as votações ficam "
+                   "no site da Câmara Municipal (atas e painel de votação), sem base nacional aberta.")
+        return
+    try:
+        v = con.execute("SELECT * FROM votos WHERE casa = ? AND parlamentar_id = ? ORDER BY data DESC", [casa, pid]).df()
+    except Exception:  # noqa: BLE001
+        v = pd.DataFrame()
+    if v.empty:
+        st.caption("Sem votações registradas no radar para este parlamentar (rode o Atualizar Radar com a versão nova).")
+        return
+    voto_n = v["voto"].map(_n)
+    sim, nao = voto_n.eq("SIM").sum(), voto_n.isin(["NAO"]).sum()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Votações nominais", len(v))
+    c2.metric("Votou SIM", int(sim))
+    c3.metric("Votou NÃO", int(nao))
+    c4.metric("Outros", int(len(v) - sim - nao), help="Abstenção, obstrução, presidente da sessão (não vota), etc. "
+              "Ausências não aparecem aqui: o registro oficial só lista quem votou.")
+    a1, a2 = st.columns([1, 2])
+    so_pec = a1.checkbox("Só PECs", key=f"pec_{casa}_{pid}")
+    busca = a2.text_input("Buscar tema", key=f"tema_{casa}_{pid}", placeholder="ex.: reforma tributária, salário mínimo, armas")
+    if so_pec:
+        v = v[v["tipo"].str.upper().eq("PEC") | v["proposicao"].str.upper().str.startswith("PEC")]
+    if busca:
+        alvo = v["ementa"].fillna("") + " " + v["descricao"].fillna("") + " " + v["proposicao"].fillna("")
+        v = v[alvo.str.contains(busca, case=False, na=False)]
+    st.dataframe(v[["data", "proposicao", "voto", "resultado", "descricao", "ementa"]], hide_index=True, width="stretch",
+                 column_config={"data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                                "proposicao": "Proposta", "voto": "Voto", "resultado": "Resultado",
+                                "descricao": st.column_config.TextColumn("O que foi votado", width="large"),
+                                "ementa": st.column_config.TextColumn("Ementa", width="large")})
+    st.caption(f"Fonte: {'Câmara dos Deputados' if casa == 'Câmara' else 'Senado Federal'} (dados abertos, votações nominais no plenário).")
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _projetos(casa: str, pid: str) -> list[dict]:
+    out = []
+    if casa == "Câmara":
+        js = _get_json(f"{CAMARA}/proposicoes?idDeputadoAutor={pid}&siglaTipo=PEC,PL,PLP,PDL,MPV&ordem=DESC&ordenarPor=id&itens=100",
+                       f"cd_props_{pid}", 3)
+        for p in (js or {}).get("dados") or []:
+            out.append({"proposta": f"{p.get('siglaTipo')} {p.get('numero')}/{p.get('ano')}", "ementa": p.get("ementa", ""),
+                        "link": f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={p.get('id')}"})
+    else:
+        js = _get_json(f"{SENADO}/senador/{pid}/autorias.json", f"sf_autorias_{pid}", 3)
+        for a in _lista(_achar(js, "Autoria")):
+            m = (a or {}).get("Materia") or a or {}
+            ident = m.get("IdentificacaoMateria") or m
+            cod = ident.get("CodigoMateria") or m.get("Codigo")
+            out.append({"proposta": ident.get("DescricaoIdentificacaoMateria")
+                        or f"{ident.get('SiglaSubtipoMateria', '')} {ident.get('NumeroMateria', '')}/{ident.get('AnoMateria', '')}",
+                        "ementa": m.get("EmentaMateria") or m.get("Ementa", ""),
+                        "link": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{cod}" if cod else ""})
+    return out
+
+
+def projetos(info: dict):
+    casa, pid = info.get("casa"), info.get("id_casa")
+    if not casa or not pid:
+        st.caption("Projetos de vereadores e prefeitos ficam no site da Câmara Municipal / Prefeitura (sem base nacional aberta).")
+        return
+    lista = _projetos(casa, pid)
+    if not lista:
+        st.caption("Nenhum projeto encontrado agora (ou o site oficial está fora do ar).")
+        return
+    df = pd.DataFrame(lista)
+    st.caption(f"{len(df)} propostas mais recentes em que é autor (PEC, PL, PLP, PDL).")
+    st.dataframe(df, hide_index=True, width="stretch", column_config={
+        "proposta": "Proposta", "ementa": st.column_config.TextColumn("Do que trata", width="large"),
+        "link": st.column_config.LinkColumn("Tramitação", display_text="abrir")})
