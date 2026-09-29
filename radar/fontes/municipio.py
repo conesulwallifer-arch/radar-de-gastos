@@ -22,6 +22,29 @@ from . import GASTOS
 API = "https://pncp.gov.br/api/consulta/v1"
 CACHE = DADOS / "bruto" / "pncp"
 MODALIDADES = range(1, 14)  # leilão, diálogo, concurso, concorrência, pregão, dispensa, inexigibilidade...
+# para descobrir os órgãos basta pregão (6), dispensa (8) e inexigibilidade (9): todo órgão ativo usa alguma delas
+MODALIDADES_DESCOBRIR = (6, 8, 9)
+CAPITAIS = {"1100205": "PORTO VELHO", "1200401": "RIO BRANCO", "1302603": "MANAUS", "1400100": "BOA VISTA",
+            "1501402": "BELÉM", "1600303": "MACAPÁ", "1721000": "PALMAS", "2111300": "SÃO LUÍS", "2211001": "TERESINA",
+            "2304400": "FORTALEZA", "2408102": "NATAL", "2507507": "JOÃO PESSOA", "2611606": "RECIFE", "2704302": "MACEIÓ",
+            "2800308": "ARACAJU", "2927408": "SALVADOR", "3106200": "BELO HORIZONTE", "3205309": "VITÓRIA",
+            "3304557": "RIO DE JANEIRO", "3550308": "SÃO PAULO", "4106902": "CURITIBA", "4205407": "FLORIANÓPOLIS",
+            "4314902": "PORTO ALEGRE", "5002704": "CAMPO GRANDE", "5103403": "CUIABÁ", "5208707": "GOIÂNIA",
+            "5300108": "BRASÍLIA"}
+
+
+def municipios_da_uf(uf: str) -> dict[str, str]:
+    """{código IBGE: NOME} de todos os municípios da UF (API do IBGE, cache de 30 dias)."""
+    arq = CACHE / f"ibge_municipios_{uf.upper()}.json"
+    if arq.exists() and time.time() - arq.stat().st_mtime < 30 * 86400:
+        return json.loads(arq.read_text(encoding="utf-8"))
+    r = requests.get(f"https://servicodados.ibge.gov.br/api/v1/localidades/estados/{uf.upper()}/municipios",
+                     headers=UA, timeout=60)
+    r.raise_for_status()
+    d = {str(m["id"]): m["nome"].upper() for m in r.json()}
+    CACHE.mkdir(parents=True, exist_ok=True)
+    arq.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    return d
 
 
 def _get(path: str, params: dict, tentativas=4):
@@ -71,11 +94,11 @@ def descobrir_orgaos(ibge: str, anos: list[int]) -> dict[str, str]:
     if orgaos and time.time() - arq.stat().st_mtime < 7 * 86400:
         return orgaos  # lista de órgãos muda pouco: revisita 1x por semana
     for de, ate in _janelas(anos[-1:]):  # o último ano já revela os órgãos ativos
-        for m in MODALIDADES:
+        for m in MODALIDADES_DESCOBRIR:
             for it in _paginar("contratacoes/publicacao", {"dataInicial": de, "dataFinal": ate,
                                                           "codigoModalidadeContratacao": m, "codigoMunicipioIbge": ibge}):
                 o = it.get("orgaoEntidade") or {}
-                if o.get("esferaId") == "M" and o.get("cnpj"):
+                if o.get("esferaId") in ("M", "D") and o.get("cnpj"):
                     orgaos[o["cnpj"]] = o.get("razaoSocial", "")
     arq.parent.mkdir(parents=True, exist_ok=True)
     arq.write_text(json.dumps(orgaos, ensure_ascii=False))
@@ -101,15 +124,34 @@ def contratos(cnpj: str, anos: list[int], forcar=False) -> list[dict]:
     return todos
 
 
-def coletar(ibges: list[str], anos: list[int], forcar=False) -> pd.DataFrame:
-    linhas = []
-    for ibge in ibges:
-        print(f"  PNCP: descobrindo órgãos municipais ({ibge})...")
-        orgaos = descobrir_orgaos(ibge, anos)
-        for cnpj, nome in orgaos.items():
-            itens = contratos(cnpj, anos, forcar)
+def _um_municipio(ibge: str, anos: list[int], forcar: bool, detalhe: bool) -> list[tuple[str, str, dict]]:
+    orgaos = descobrir_orgaos(ibge, anos)
+    saida = []
+    for cnpj, nome in orgaos.items():
+        itens = contratos(cnpj, anos, forcar)
+        if detalhe:
             print(f"    {nome[:55]:<55} {len(itens):>6} contratos/empenhos")
-            for c in itens:
+        saida += [(cnpj, nome, c) for c in itens]
+    return saida
+
+
+def coletar(ibges: list[str], anos: list[int], forcar=False, nomes: dict | None = None) -> pd.DataFrame:
+    """Contratos PNCP de todos os órgãos municipais dos municípios pedidos (em paralelo, com cache)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    linhas, nomes = [], nomes or {}
+    detalhe = len(ibges) <= 3
+    with ThreadPoolExecutor(4 if len(ibges) > 1 else 1) as ex:
+        futs = {ex.submit(_um_municipio, i, anos, forcar, detalhe): i for i in ibges}
+        for k, f in enumerate(as_completed(futs), 1):
+            ibge = futs[f]
+            try:
+                achados = f.result()
+            except Exception as e:  # noqa: BLE001
+                print(f"  PNCP {nomes.get(ibge, ibge)}: falha ({e})")
+                continue
+            if not detalhe:
+                print(f"  PNCP [{k}/{len(ibges)}] {nomes.get(ibge, ibge)[:40]:<40} {len(achados):>6} contratos")
+            for cnpj, nome, c in achados:
                 u = c.get("unidadeOrgao") or {}
                 o = c.get("orgaoEntidade") or {}
                 tipo = (c.get("tipoContrato") or {}).get("nome", "")
