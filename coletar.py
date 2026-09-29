@@ -52,7 +52,7 @@ def unificar_ids(g: pd.DataFrame, cands: pd.DataFrame) -> pd.DataFrame:
 
 
 def montar_politicos(g: pd.DataFrame, cands: pd.DataFrame, indice: pd.DataFrame) -> pd.DataFrame:
-    g = g.sort_values("data")
+    g = g.sort_values("data", na_position="first")  # o dado mais recente (com data) prevalece
     p = g.groupby("politico_id").agg(
         nome=("politico_nome", "last"), cargo=("cargo", "last"), partido=("partido", "last"),
         uf=("uf", "last"), municipio=("municipio", "last"), cpf=("politico_cpf", "last"),
@@ -110,7 +110,9 @@ def main():
             print(f"Município {nome_m}: contratos no PNCP e planilhas dos portais...")
             if ibge:
                 partes.append(municipio.coletar([ibge], a.anos, a.forcar))
-            partes.append(importar.coletar(nome_m, (a.ufs or ["MS"])[0], cands))
+            from radar.fontes.estados import UFS as _UFS
+            uf_mun = _UFS.get(int(ibge[:2]), "") if ibge[:2].isdigit() else ""
+            partes.append(importar.coletar(nome_m, uf_mun or (a.ufs or ["MS"])[0], cands))
         g = pd.concat([p for p in partes if not p.empty], ignore_index=True).reindex(columns=GASTOS, fill_value="")
         id_orig = g["politico_id"].copy()
         g = unificar_ids(g, cands)
