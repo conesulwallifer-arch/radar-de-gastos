@@ -178,7 +178,15 @@ def main():
 
     print(f"3/4 Enviando os dados para {dataset} (pode levar alguns minutos)...")
     api.create_repo(dataset, repo_type="dataset", exist_ok=True)
-    api.upload_folder(folder_path=str(PUB), repo_id=dataset, repo_type="dataset",
+    # tudo em 3 arquivos (o site baixa rápido e sem bater no limite de requisições do Hugging Face)
+    if (PUB / "bruto").exists():
+        shutil.make_archive(str(PUB / "bruto"), "zip", root_dir=str(PUB / "bruto"))
+    from huggingface_hub import CommitOperationAdd, CommitOperationDelete
+    ops = [CommitOperationAdd(path_in_repo=n, path_or_fileobj=str(PUB / n))
+           for n in ("radar.duckdb", "atualizado_em.txt", "bruto.zip") if (PUB / n).exists()]
+    antigos = [f for f in api.list_repo_files(dataset, repo_type="dataset") if f.startswith("bruto/")]
+    ops += [CommitOperationDelete(path_in_repo=f) for f in antigos]
+    api.create_commit(dataset, repo_type="dataset", operations=ops,
                       commit_message=f"dados {dt.date.today():%d/%m/%Y}")
 
     if a.destino == "streamlit":
