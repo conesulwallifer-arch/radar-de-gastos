@@ -88,19 +88,38 @@ def candidatos(ano: int, ufs=None, forcar=False) -> pd.DataFrame:
     return out.sort_values("eleito", ascending=False).drop_duplicates("sq")
 
 
+TODAS_UFS = ["AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR",
+             "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO", "BR"]
+
+
 def redes_sociais(ano: int, sqs, ufs=None, forcar=False) -> pd.DataFrame:
-    """Sites e redes sociais que o candidato declarou ao TSE (Instagram, Facebook, etc.)."""
-    sqs = set(sqs)
+    """Sites e redes sociais que o candidato declarou ao TSE (Instagram, Facebook, etc.).
+    O TSE às vezes publica um zip único e às vezes um zip por UF: tenta os dois formatos."""
+    sqs = set(map(str, sqs))
+    filtro = lambda b: b[b["SQ_CANDIDATO"].astype(str).isin(sqs)] if sqs else b
+    base = CDN + "/consulta_cand/rede_social_candidato_{ano}{suf}.zip"
+    partes = []
     try:
-        df = _ler(URL_REDES.format(ano=ano), f"rede_social_candidato_{ano}.zip", r"rede_social_candidato_.*\.csv$",
-                  ufs, forcar, usecols=["SQ_CANDIDATO", "DS_URL"], filtro=lambda b: b[b["SQ_CANDIDATO"].isin(sqs)])
+        df = _ler(base.format(ano=ano, suf=""), f"rede_social_candidato_{ano}.zip", r"rede_social_candidato_.*\.csv$",
+                  ufs, forcar, usecols=["SQ_CANDIDATO", "DS_URL"], filtro=filtro)
+        if len(df):
+            partes.append(df)
+        else:  # zip único indisponível: um por UF
+            for uf in (list(ufs) + ["BR"] if ufs else TODAS_UFS):
+                d = _ler(base.format(ano=ano, suf=f"_{uf}"), f"rede_social_candidato_{ano}_{uf}.zip",
+                         r"rede_social_candidato_.*\.csv$", None, forcar, usecols=["SQ_CANDIDATO", "DS_URL"], filtro=filtro)
+                if len(d):
+                    partes.append(d)
     except Exception as e:  # noqa: BLE001
         print(f"  redes sociais {ano}: {e}")
+    if not partes:
+        print(f"  redes sociais {ano}: TSE não disponibilizou o arquivo (fica sem redes; deputados/senadores usam a Câmara/Senado)")
         return pd.DataFrame(columns=["ano", "sq", "url"])
-    if df.empty:
-        return pd.DataFrame(columns=["ano", "sq", "url"])
-    out = pd.DataFrame({"ano": ano, "sq": df["SQ_CANDIDATO"], "url": df["DS_URL"].fillna("").str.strip()})
-    return out[out["url"] != ""].drop_duplicates()
+    df = pd.concat(partes, ignore_index=True)
+    out = pd.DataFrame({"ano": ano, "sq": df["SQ_CANDIDATO"].astype(str), "url": df["DS_URL"].fillna("").str.strip()})
+    out = out[out["url"] != ""].drop_duplicates()
+    print(f"  redes sociais {ano}: {len(out)} links de {out['sq'].nunique()} candidatos")
+    return out
 
 
 def bens(ano: int, ufs=None, forcar=False) -> pd.DataFrame:
