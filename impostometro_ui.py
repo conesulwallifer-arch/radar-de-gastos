@@ -107,6 +107,21 @@ def _componentes(onde: str, arr: pd.DataFrame, est: pd.DataFrame | None, CURTO) 
         except Exception as e:  # noqa: BLE001
             notas.append(f"Recolhimento diário federal indisponível agora ({e}).")
     d_fed = arr if onde == "Brasil" else arr[arr["uf"] == onde]
+    # CONFERÊNCIA AUTOMÁTICA: o total diário do Tesouro no último ano fechado tem que bater
+    # (±30%) com o total oficial da Receita no mesmo ano; se não bater, usa só a Receita.
+    if rd:
+        y = ano - 1
+        pdia = rd["por_dia"]
+        pdia_y = pdia[pdia.index.year == y]
+        rec_y = arr[arr["data"].dt.year == y]
+        if pdia_y.index.nunique() >= 200 and rec_y["data"].dt.month.nunique() == 12:
+            razao = pdia_y.sum() / max(rec_y["valor"].sum(), 1)
+            if not 0.7 <= razao <= 1.35:
+                notas.append(f"⚠️ Conferência: o recolhimento diário de {y} ({CURTO(pdia_y.sum())}) não bateu com o total "
+                             f"oficial da Receita ({CURTO(rec_y['valor'].sum())}); usando só o dado da Receita.")
+                rd = None
+            else:
+                notas.append(f"✔️ Conferido: diário do Tesouro em {y} = {razao*100:.0f}% do total oficial da Receita.")
     if rd:
         comp.append({"n": "Federal (União, com INSS)", "o": rd["oficial_ano"], "b": _epoch(rd["base_ts"]),
                      "p": rd["por_segundo"], "c": CORES["Federal"], "s": f"real até {rd['ultimo_dia']:%d/%m} (diário)"})
@@ -121,6 +136,16 @@ def _componentes(onde: str, arr: pd.DataFrame, est: pd.DataFrame | None, CURTO) 
     # Estadual
     e_uf = est if (est is not None and onde == "Brasil") else (est[est["uf"] == onde] if est is not None else None)
     re_ = estados.ritmo(e_uf) if e_uf is not None and len(e_uf) else None
+    if re_ and onde == "Brasil":
+        # CONFERÊNCIA: ICMS+IPVA+ITCD dos estados (12 meses) vs base oficial da Carga Tributária
+        esperado = sum(v * g ** (ano - a) for a, v in ESTADUAIS_RESERVA.values())
+        razao = re_["ult12"] / esperado
+        if not 0.6 <= razao <= 1.6:
+            notas.append(f"⚠️ Conferência: estados somaram {CURTO(re_['ult12'])} em 12 meses, fora do esperado "
+                         f"(~{CURTO(esperado)}); usando a base oficial.")
+            re_ = None
+        else:
+            notas.append(f"✔️ Conferido: estados em 12 meses = {razao*100:.0f}% do esperado pela Carga Tributária oficial.")
     if re_:
         um = re_["ultimo_mes"]
         comp.append({"n": "Estadual (ICMS, IPVA, ITCD)", "o": re_["oficial_ano"], "b": _epoch(re_["base_ts"]),
