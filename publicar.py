@@ -24,14 +24,21 @@ RAIZ = Path(__file__).resolve().parent
 PUB = DADOS / "publico"
 TOKEN_ARQ = DADOS / ".hf_token"
 
-PID = "CASE WHEN {c} LIKE 'P-%' THEN 'P-' || substr(md5({c}), 1, 14) ELSE {c} END"
-CPF = "CASE WHEN length({c}) = 11 THEN '***' || substr({c}, 4, 6) || '**#' || substr(md5({c}), 1, 4) ELSE {c} END"
+# sal secreto (fica só no seu PC, em dados/.sal): sem ele ninguém consegue reverter os códigos para CPF
+SAL_ARQ = DADOS / ".sal"
+if not SAL_ARQ.exists():
+    import secrets
+    SAL_ARQ.parent.mkdir(parents=True, exist_ok=True)
+    SAL_ARQ.write_text(secrets.token_hex(32))
+SAL = SAL_ARQ.read_text().strip()
+PID = "CASE WHEN {c} LIKE 'P-%' THEN 'P-' || substr(md5('" + SAL + "' || {c}), 1, 14) ELSE {c} END"
+CPF = "CASE WHEN length({c}) = 11 THEN '***' || substr({c}, 4, 6) || '**#' || substr(md5('" + SAL + "' || {c}), 1, 6) ELSE {c} END"
 TRANSFORMA = {
     "gastos": {"politico_id": PID, "politico_cpf": "''", "fornecedor_doc": CPF},
-    "alertas": {"politico_id": PID},
+    "alertas": {"politico_id": PID, "detalhe": r"regexp_replace({c}, '\b\d{{3}}(\d{{6}})\d{{2}}\b', '***\1**', 'g')"},
     "politicos": {"politico_id": PID, "cpf": "''"},
     "receitas": {"politico_id": PID, "politico_cpf": "''", "doador_doc": CPF},
-    "candidatos": {"cpf": "''", "pessoa": "substr(md5('P-' || pessoa), 1, 14)"},
+    "candidatos": {"cpf": "''", "pessoa": "substr(md5('" + SAL + "' || 'P-' || pessoa), 1, 14)"},
     "ids_externos": {"politico_id": PID},
     "sancoes": {"doc": CPF},
 }
