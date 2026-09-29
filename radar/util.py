@@ -169,3 +169,19 @@ def chave_pessoa(cpf: str, nome: str, nasc: str = "") -> str:
         return cpf
     base = norm_nome(nome) + "|" + str(nasc or "")
     return "N" + hashlib.md5(base.encode()).hexdigest()[:12]
+
+
+def data_br(serie: pd.Series) -> pd.Series:
+    """Converte datas de qualquer fonte: ISO (2025-03-05, inclusive vinda do Excel) ou brasileira (05/03/2025).
+    Datas impossíveis (ano 0023, 2049...) viram vazio em vez de quebrar."""
+    s = serie.fillna("").astype(str).str.strip().str[:10]
+    iso = s.str.match(r"^\d{4}-\d{2}-\d{2}$")
+    partes = []
+    for mask, kw in ((iso, {"format": "%Y-%m-%d"}), (~iso, {"dayfirst": True})):
+        if mask.any():
+            p = pd.to_datetime(s[mask], errors="coerce", **kw)
+            ok = p.notna() & p.dt.year.between(1990, 2100)
+            partes.append(pd.Series([x if o else pd.NaT for x, o in zip(p, ok)], index=p.index, dtype="object"))
+    if not partes:
+        return pd.Series(pd.NaT, index=serie.index, dtype="datetime64[ns]")
+    return pd.to_datetime(pd.concat(partes).reindex(serie.index), errors="coerce")
