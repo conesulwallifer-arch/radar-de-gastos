@@ -320,6 +320,9 @@ def grafico_barras(df, rotulo_col, valor_col, cor_col=None, altura_linha=30, for
 
 
 with aba_rank:
+    from radar.textos import O_QUE_ENTRA as _OQE
+    with st.expander("ℹ️ O que entra nesses valores (e o que não entra, como o salário)"):
+        st.markdown(_OQE)
     c1, c2, c3 = st.columns(3)
     quem = c1.radio("Mostrar", ["Políticos", "Órgãos municipais", "Todos"], horizontal=True, key="rk_quem")
     n_top = c2.select_slider("Quantos no ranking", options=[10, 15, 20, 30, 50], value=20, key="rk_n")
@@ -413,8 +416,18 @@ def detalhe_politico(p, eh_orgao: bool):
         ficha(p, con, g_todo, a, BRL, CURTO)
         st.divider()
         st.subheader("💸 Gastos")
+    per_txt = "todo o período do radar" if not com_periodo else f"{pd.Timestamp(de_s):%d/%m/%Y} a {pd.Timestamp(ate_s):%d/%m/%Y}"
+    st.caption(f"Período: **{per_txt}** (muda na barra lateral, em Período). **Não inclui salário.**")
+    if len(g):
+        comp = (g.assign(ano=pd.to_datetime(g["data"]).dt.year)
+                 .groupby("fonte").agg(total=("valor", "sum"), notas=("valor", "size"),
+                                       de=("ano", "min"), ate=("ano", "max")).reset_index().sort_values("total", ascending=False))
+        partes = [f"**{r.fonte}**: {CURTO(r.total)} ({r.notas} lançamentos"
+                  + (f", {int(r.de)}–{int(r.ate)}" if pd.notna(r.de) and r.de != r.ate else (f", {int(r.de)}" if pd.notna(r.de) else "")) + ")"
+                  for r in comp.itertuples()]
+        st.markdown("De onde vem este total: " + " · ".join(partes))
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total gasto", CURTO(g["valor"].sum())); c2.metric("Notas", len(g)); c3.metric("Índice de atenção", int(p["indice"]))
+    c1.metric("Total no período", CURTO(g["valor"].sum()), help="Soma das notas das fontes acima, dentro do período escolhido. Não inclui salário."); c2.metric("Notas", len(g)); c3.metric("Índice de atenção", int(p["indice"]))
     if not a.empty:
         st.subheader("Alertas")
         for r in a.itertuples():
@@ -468,10 +481,10 @@ def tabela_ranking(df, key):
     tab = df[["nome", "cargo", "partido", "uf", "municipio", "total", "n_gastos", "n_alertas", "indice", "politico_id"]].reset_index(drop=True)
     ev = st.dataframe(tab.drop(columns="politico_id"), width="stretch", hide_index=True, on_select="rerun", selection_mode="single-row", key=key,
                       column_config={"nome": "Nome", "cargo": "Cargo", "partido": "Partido", "uf": "UF", "municipio": "Município",
-                                     "total": st.column_config.NumberColumn("Total gasto (R$)", format="localized"),
+                                     "total": st.column_config.NumberColumn("Gastos registrados (R$)", format="localized", help="Cota parlamentar + campanha (TSE) + contratos/pagamentos municipais, conforme o caso. Não inclui salário."),
                                      "n_gastos": st.column_config.NumberColumn("Notas", format="localized"),
                                      "n_alertas": st.column_config.NumberColumn("Alertas", format="localized"),
-                                     "indice": st.column_config.ProgressColumn("Índice de atenção", min_value=0, max_value=100, format="%d")})
+                                     "indice": st.column_config.ProgressColumn("Índice de atenção", min_value=0, max_value=100, format="%d", help="0 a 100: quanto maior, mais alertas automáticos (ponderados pela gravidade). Não é prova de irregularidade.")})
     return tab.iloc[ev.selection.rows[0]] if ev.selection.rows else None
 
 
@@ -482,11 +495,17 @@ with aba1:
     with t_pol:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Políticos", f"{len(fp):,}".replace(",", "."))
-        c2.metric("Gasto no período" if com_periodo else "Gasto total", CURTO(fp["total"].sum()))
+        c2.metric("Gastos registrados" + (" no período" if com_periodo else ""), CURTO(fp["total"].sum()),
+                  help="Cota parlamentar + gastos de campanha declarados ao TSE. Não inclui salários.")
         c3.metric("Com alerta", f"{(fp['n_alertas'] > 0).sum():,}".replace(",", "."))
         c4.metric("Alertas", f"{fp['n_alertas'].sum():,}".replace(",", "."))
+        from radar.textos import O_QUE_ENTRA
+        with st.expander("ℹ️ O que entra nesses valores (e o que não entra, como o salário)"):
+            st.markdown(O_QUE_ENTRA)
         st.subheader("Ranking por índice de atenção")
-        st.caption("Clique num político para ver a ficha: foto, contatos, redes sociais, mandato e onde cobrar.")
+        st.caption("Clique num político para ver a ficha: foto, contatos, redes sociais, mandato, salário e onde cobrar. "
+                   "**Índice de atenção** (0 a 100): quanto maior, mais alertas automáticos, ponderados pela gravidade. "
+                   "Alerta é indício para conferir, não prova de irregularidade.")
         sel = tabela_ranking(fp, "rk_pol")
         if sel is not None:
             detalhe_politico(sel, eh_orgao=False)
