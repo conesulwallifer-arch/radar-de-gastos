@@ -70,16 +70,44 @@ def _data(s):
         return None
 
 
+def mesmo_nome(nome: str, *candidatos) -> bool:
+    """Confere se a ficha encontrada é mesmo da pessoa (evita puxar homônimo ou código errado)."""
+    alvo = {t for t in _n(nome).split() if len(t) > 2}
+    if not alvo:
+        return False
+    for c in candidatos:
+        tok = {t for t in _n(c).split() if len(t) > 2}
+        if tok and (len(alvo & tok) >= 2 or alvo <= tok or tok <= alvo):
+            return True
+    return False
+
+
 # --------------------------------------------------------------------- fontes
 @st.cache_data(ttl=86400, show_spinner=False)
 def perfil_camara(dep_id: str, nome: str = "", uf: str = "") -> dict | None:
-    if not dep_id and nome:
-        js = _get_json(f"{CAMARA}/deputados?nome={up.quote(nome)}&siglaUf={uf}&itens=5", f"cd_busca_{nome}_{uf}", 30)
-        achados = (js or {}).get("dados") or []
-        if not achados:
-            return None
-        dep_id = str(achados[0]["id"])
-    js = _get_json(f"{CAMARA}/deputados/{dep_id}", f"cd_{dep_id}")
+    js = _get_json(f"{CAMARA}/deputados/{dep_id}", f"cd_{dep_id}") if dep_id else None
+    def ok(j):
+        if not j:
+            return False
+        us = j["dados"].get("ultimoStatus") or {}
+        if uf and us.get("siglaUf") and us["siglaUf"].upper() != uf.upper():
+            return False
+        return mesmo_nome(nome, us.get("nomeEleitoral"), us.get("nome"), j["dados"].get("nomeCivil"))
+    if not ok(js) and nome:
+        # código não bate com o nome: procura pelo nome (e UF) entre os deputados
+        js = None
+        toks = nome.split()
+        termos = list(dict.fromkeys([nome] + ([f"{toks[0]} {toks[-1]}", f"{toks[0]} {toks[1]}"] if len(toks) > 2 else [])))
+        for q_uf, termo in [(u, t) for t in termos for u in ([uf] if uf else [""])]:
+            busca = _get_json(f"{CAMARA}/deputados?nome={up.quote(termo)}&siglaUf={q_uf}&itens=10",
+                              f"cd_busca_{termo}_{q_uf}", 30)
+            for d in (busca or {}).get("dados") or []:
+                cand = _get_json(f"{CAMARA}/deputados/{d['id']}", f"cd_{d['id']}")
+                if ok(cand):
+                    js, dep_id = cand, str(d["id"])
+                    break
+            if js:
+                break
     if not js:
         return None
     d = js["dados"]
@@ -132,6 +160,8 @@ def perfil_senado(cod: str, nome: str = "") -> dict | None:
     if not js:
         return None
     idp = _achar(js, "IdentificacaoParlamentar") or {}
+    if nome and not mesmo_nome(nome, idp.get("NomeParlamentar"), idp.get("NomeCompletoParlamentar")):
+        return None
     bas = _achar(js, "DadosBasicosParlamentar") or {}
     tels = [t.get("NumeroTelefone") for t in _lista(_achar(js, "Telefone")) if isinstance(t, dict) and t.get("NumeroTelefone")]
     mand = _get_json(f"{SENADO}/senador/{cod}/mandatos.json", f"sf_mand_{cod}")
@@ -182,7 +212,12 @@ def perfil_tse(con, politico_id: str) -> dict | None:
     elif re.search("senador", cargo, re.I):
         ini, fim = dt.date(ano + 1, 2, 1), dt.date(ano + 9, 1, 31)
     elif re.search("governador", cargo, re.I):
-        ini, fim = dt.date(ano + 1, 1, 6), dt.date(ano + 5, 1, 5)
+        # EC 111/2021: eleitos em 2022 tomaram posse em 1º/jan/2023 e ficam até 6/jan/2027; a partir de 2026, posse em 6/jan
+        ini = dt.date(ano + 1, 1, 6) if ano >= 2026 else dt.date(ano + 1, 1, 1)
+        fim = dt.date(ano + 5, 1, 6) if ano >= 2022 else dt.date(ano + 4, 12, 31)
+    elif re.search("presidente", cargo, re.I):
+        ini = dt.date(ano + 1, 1, 5) if ano >= 2026 else dt.date(ano + 1, 1, 1)
+        fim = dt.date(ano + 5, 1, 5) if ano >= 2022 else dt.date(ano + 4, 12, 31)
     else:
         ini, fim = dt.date(ano + 1, 2, 1), dt.date(ano + 5, 1, 31)
     try:
@@ -261,7 +296,7 @@ def ficha(p, con, g: pd.DataFrame, a: pd.DataFrame, BRL, CURTO):
     with st.spinner("Buscando a ficha oficial..."):
         if "Deputado Federal" in cargo:
             cd = next((i[3:] for i in ids if i.startswith("CD-") and i[3:].isdigit()), "")
-            info = perfil_camara(cd, "" if cd else str(p["nome"]), str(p["uf"] or ""))
+            info = perfil_camara(cd, str(p["nome"]), str(p["uf"] or ""))
         elif "Senador" in cargo:
             sf = next((i[3:] for i in ids if i.startswith("SF-")), str(p["nome"]))
             info = perfil_senado(sf, str(p["nome"]))
@@ -352,7 +387,7 @@ def ficha(p, con, g: pd.DataFrame, a: pd.DataFrame, BRL, CURTO):
             pontos.append(f"- {r.titulo}: {r.detalhe} ({BRL(r.valor)})")
         texto = (f"Prezado(a) {info.get('nome') or p['nome']},\n\n"
                  f"Sou cidadão e contribuinte. Acompanhando os dados públicos dos seus gastos "
-                 f"({CURTO(g['valor'].sum())} em {len(g)} lançamentos no período consultado), identifiquei pontos que "
+                 f"({CURTO(g['valor'].sum())} em {len(g)} lançamentos registrados nas fontes oficiais), identifiquei pontos que "
                  f"gostaria que fossem esclarecidos:\n\n" + ("\n".join(pontos) if pontos else "- (sem alertas no período; peço a prestação de contas detalhada)")
                  + "\n\nSolicito, com base na Lei de Acesso à Informação (Lei 12.527/2011), as notas fiscais, contratos e a "
                    "justificativa de cada despesa acima, e a indicação do resultado obtido para a população.\n\n"
