@@ -117,7 +117,7 @@ def ritmo(df: pd.DataFrame, agora: pd.Timestamp | None = None) -> dict | None:
     tot = df.groupby("data")["valor"].sum()
     # último mês em que a maioria dos estados já publicou
     n_uf = df.groupby("data")["uf"].nunique()
-    completos = n_uf[n_uf >= 0.8 * n_uf.max()].index
+    completos = n_uf[n_uf >= n_uf.max()].index  # só meses em que TODOS os estados já publicaram
     ultimo = max(completos) if len(completos) else tot.index.max()
     tot = tot[tot.index <= ultimo]
     ult12 = tot[tot.index > ultimo - pd.DateOffset(months=12)]
