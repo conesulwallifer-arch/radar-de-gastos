@@ -286,7 +286,7 @@ def cadastro_empresa(g, emp, cands, dias_novo=180):
             hits, det = [], []
             for _, r in s.iterrows():
                 achou = [n for n, d in zip(r["socios"].split(";"), r["socios_docs"].split(";"))
-                         if (norm(n), d[-8:-2] if len(d) >= 8 else d) in chave and norm(n) != norm(r["politico_nome"])]
+                         if (norm(n), d.strip()[-8:-2] if len(d.strip()) >= 8 else d.strip()) in chave and norm(n) != norm(r["politico_nome"])]
                 if achou:
                     hits.append(r.name)
                     det.append("Sócio(s) candidato(s): " + ", ".join(a.strip() for a in achou))
