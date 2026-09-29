@@ -71,6 +71,12 @@ def main():
     ap.add_argument("--eleicoes", nargs="+", type=int, default=[2022, 2024], help="eleições do TSE (2024=prefeitos/vereadores)")
     ap.add_argument("--municipio", nargs="+", default=[], metavar="NOME:IBGE",
                     help="gastos do mandato municipal (PNCP + planilhas em dados/importar). Ex.: DOURADOS:5003702")
+    ap.add_argument("--municipios-uf", nargs="+", default=[], metavar="UF",
+                    help="contratos PNCP de TODOS os municípios dessas UFs (ex.: MS)")
+    ap.add_argument("--capitais", action="store_true", help="inclui os contratos PNCP das 27 capitais")
+    ap.add_argument("--anos-municipios", nargs="+", type=int, default=[hoje - 1, hoje],
+                    help="anos de contratos para os municípios em massa (o município principal usa --anos)")
+    ap.add_argument("--sem-votacoes", action="store_true", help="não baixa as votações da Câmara/Senado")
     ap.add_argument("--ufs", nargs="+", default=None, help="filtra o TSE por UF (ex.: MS SP)")
     ap.add_argument("--todos-candidatos", action="store_true", help="inclui gastos de campanha de não eleitos")
     ap.add_argument("--top-cnpj", type=int, default=400, help="quantos CNPJs consultar na Receita (0 desliga)")
@@ -113,6 +119,20 @@ def main():
             from radar.fontes.estados import UFS as _UFS
             uf_mun = _UFS.get(int(ibge[:2]), "") if ibge[:2].isdigit() else ""
             partes.append(importar.coletar(nome_m, uf_mun or (a.ufs or ["MS"])[0], cands))
+        # demais municípios (todos da UF e/ou capitais): só contratos PNCP
+        foco = {m.partition(":")[2] for m in a.municipio}
+        extras = {}
+        for uf in a.municipios_uf:
+            try:
+                extras.update(municipio.municipios_da_uf(uf))
+            except Exception as e:  # noqa: BLE001
+                print(f"  IBGE {uf}: falha ao listar municípios ({e})")
+        if a.capitais:
+            extras.update(municipio.CAPITAIS)
+        extras = {k: v for k, v in extras.items() if k not in foco}
+        if extras:
+            print(f"Municípios: contratos PNCP de {len(extras)} municípios (1ª vez demora; depois usa cache)...")
+            partes.append(municipio.coletar(list(extras), a.anos_municipios, a.forcar, nomes=extras))
         g = pd.concat([p for p in partes if not p.empty], ignore_index=True).reindex(columns=GASTOS, fill_value="")
         id_orig = g["politico_id"].copy()
         g = unificar_ids(g, cands)
@@ -123,6 +143,11 @@ def main():
         redes = [tse.redes_sociais(int(an), cands.loc[(cands["ano"] == an) & cands["eleito"], "sq"], a.ufs, a.forcar)
                  for an in sorted(set(cands["ano"].unique()) & set(a.eleicoes))] if len(cands) else []
         redes = pd.concat(redes, ignore_index=True) if redes else pd.DataFrame(columns=["ano", "sq", "url"])
+        votos = pd.DataFrame()
+        if not a.sem_votacoes:
+            print("Votações nominais (Câmara e Senado)...")
+            from radar.fontes import atividade
+            votos = atividade.coletar(a.anos, ids_ext)
         # datas digitadas erradas na origem (ano 0023, 2049...) ficam em branco
         g["data"] = pd.to_datetime(g["data"], errors="coerce")
         ruim = (g["data"].dt.year < 2000) | (g["data"].dt.year > dt.date.today().year)
@@ -146,10 +171,17 @@ def main():
             print(f"Receita: consultando {len(top)} CNPJs (os já consultados vêm do cache)...")
             emp = empresas.enriquecer_cnpjs(top, limite=3000)
 
+        # NOVIDADES: o que entrou desde a última coleta (para a aba 📰 Novidades)
+        _prev = set()
+        try:
+            _prev = set(con.execute("SELECT id FROM gastos").df()["id"])
+        except Exception:  # noqa: BLE001
+            pass
+        novos_gastos = g[~g["id"].isin(_prev)] if _prev else g.iloc[0:0]
         for nome, df in {"gastos": g, "candidatos": cands,
                          "bens": pd.concat(bens_, ignore_index=True) if bens_ else pd.DataFrame(columns=["ano", "sq", "valor"]),
                          "receitas": pd.concat(recs, ignore_index=True) if recs else pd.DataFrame(columns=["ano", "sq", "politico_cpf", "doador_doc", "doador", "valor"]),
-                         "sancoes": sanc, "empresas": emp, "ids_externos": ids_ext, "redes": redes}.items():
+                         "sancoes": sanc, "empresas": emp, "ids_externos": ids_ext, "redes": redes, "votos": votos}.items():
             if df.shape[1] == 0:
                 continue
             con.register("tmp", df)
@@ -162,6 +194,37 @@ def main():
     print("Rodando detectores...")
     alertas = detectores.rodar(g, cands, t("bens"), t("receitas"), t("sancoes"), t("empresas"))
     politicos = montar_politicos(g, cands, detectores.indice_atencao(alertas))
+    # alertas novos = que não existiam na coleta anterior
+    try:
+        prev_al = con.execute("SELECT politico_id || codigo || coalesce(gasto_id, '') k FROM alertas").df()["k"]
+        prev_al = set(prev_al)
+    except Exception:  # noqa: BLE001
+        prev_al = set()
+    agora = dt.datetime.now().replace(microsecond=0)
+    nov = []
+    if prev_al:
+        k = alertas["politico_id"] + alertas["codigo"] + alertas["gasto_id"].fillna("")
+        for r in alertas[~k.isin(prev_al)].itertuples():
+            nov.append({"quando": agora, "tipo": "Novo alerta", "politico_id": r.politico_id, "titulo": r.titulo,
+                        "detalhe": str(r.detalhe), "valor": float(r.valor or 0), "data_ref": None, "url": ""})
+    if "novos_gastos" in locals() and len(novos_gastos):
+        top = novos_gastos.sort_values("valor", ascending=False).head(3000)
+        for r in top.itertuples():
+            nov.append({"quando": agora, "tipo": "Contrato novo" if r.fonte == "Contratos PNCP" else "Nota nova",
+                        "politico_id": r.politico_id, "titulo": f"{r.fonte}: {r.fornecedor}"[:200],
+                        "detalhe": str(r.descricao or r.categoria)[:300], "valor": float(r.valor or 0),
+                        "data_ref": r.data, "url": r.url_doc or ""})
+        print(f"Novidades: {len(novos_gastos):,} lançamentos novos · {len([n for n in nov if n['tipo'] == 'Novo alerta']):,} alertas novos".replace(",", "."))
+    if nov:
+        novd = pd.DataFrame(nov)
+        try:
+            ant = con.execute("SELECT * FROM novidades WHERE quando >= now() - INTERVAL 120 DAY").df()
+            novd = pd.concat([ant, novd], ignore_index=True)
+        except Exception:  # noqa: BLE001
+            pass
+        con.register("tmp", novd)
+        con.execute("CREATE OR REPLACE TABLE novidades AS SELECT * FROM tmp")
+        con.unregister("tmp")
     for nome, df in {"alertas": alertas, "politicos": politicos}.items():
         con.register("tmp", df)
         con.execute(f"CREATE OR REPLACE TABLE {nome} AS SELECT * FROM tmp")
