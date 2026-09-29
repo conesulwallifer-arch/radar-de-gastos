@@ -349,12 +349,45 @@ def ficha(p, con, g: pd.DataFrame, a: pd.DataFrame, BRL, CURTO):
                                             + (f" · faltam {_tempo(hoje, fim)}" if hoje < fim else " · mandato encerrado")))
         gm = g[(pd.to_datetime(g["data"]) >= pd.Timestamp(ini)) & (pd.to_datetime(g["data"]) <= pd.Timestamp(min(hoje, fim)))]
         m1, m2, m3 = st.columns(3)
-        m1.metric("Gasto registrado neste mandato", CURTO(gm["valor"].sum()))
-        m2.metric("Por mês de mandato", CURTO(gm["valor"].sum() / max(1, feito / 30.4)))
-        m3.metric("Mandatos conquistados", info.get("n_mandatos") or "—")
+        # a média usa só os meses que o radar cobre (a cota é coletada a partir de 2023, por padrão)
+        if len(gm):
+            d0 = max(pd.Timestamp(ini), pd.to_datetime(gm["data"]).min().replace(day=1))
+            d1 = pd.Timestamp(min(hoje, fim))
+            meses = max(1, (d1.year - d0.year) * 12 + d1.month - d0.month + 1)
+        else:
+            d0, meses = pd.Timestamp(ini), 1
+        m1.metric(f"Gasto no mandato (desde {d0:%m/%Y})", CURTO(gm["valor"].sum()),
+                  help="Soma de todas as notas do radar dentro do mandato, sem o filtro de período da barra lateral.")
+        m2.metric("Média por mês", CURTO(gm["valor"].sum() / meses), help=f"Total ÷ {meses} meses com dados no radar.")
+        m3.metric("Mandatos nesta função", info.get("n_mandatos") or "—",
+                  help="Deputado: legislaturas na Câmara · Senador: mandatos no Senado · Prefeito/vereador: eleições vencidas registradas no TSE.")
+        if len(gm) and d0 > pd.Timestamp(ini) + pd.Timedelta(days=60):
+            st.caption(f"O radar tem os gastos deste político a partir de {d0:%m/%Y}; o que foi gasto antes disso no mandato não está nesta soma.")
         if gm.empty and len(g):
             st.caption("Os gastos que o radar tem desta pessoa são da campanha (antes do mandato). Para ver os gastos do mandato "
                        "(diárias, verba de gabinete), exporte as planilhas do portal da Câmara/Prefeitura para dados\\importar.")
+    # ---- salário: SEPARADO dos gastos
+    from radar.textos import SUBSIDIO_DESDE, SUBSIDIO_FEDERAL
+    st.markdown("#### 💼 Salário (não entra nos gastos)")
+    if re.search("deputado federal|senador", cargo, re.I):
+        s1, s2 = st.columns(2)
+        s1.metric("Salário bruto mensal (subsídio)", BRL(SUBSIDIO_FEDERAL),
+                  help=f"Valor desde {SUBSIDIO_DESDE} (Decreto Legislativo 172/2022), igual para deputados federais e senadores. "
+                       "Há também 13º salário. Antes de 2025 o valor era menor.")
+        s2.metric("Por ano (13 salários)", CURTO(SUBSIDIO_FEDERAL * 13))
+        st.caption("Além do salário, o gabinete recebe verba para pagar assessores, e há auxílio-moradia ou apartamento funcional. "
+                   "Nada disso está somado nos gastos do radar, que mostram só a cota parlamentar (reembolso de despesas).")
+    elif re.search("prefeit|vereador", cargo, re.I):
+        mun = str(p.get("municipio") or "").title()
+        st.caption(f"O salário de {cargo.lower()} é fixado por lei municipal e não existe em base nacional aberta. "
+                   f"Consulte a folha de pagamento no portal da transparência de {mun or 'seu município'}. "
+                   "Os valores de gastos do radar para esta pessoa são de campanha (TSE) e, se importados, diárias e pagamentos do portal.")
+        if mun:
+            st.link_button("🔎 Ver salário no portal da transparência",
+                           f"https://www.google.com/search?q={up.quote(f'portal da transparência {mun} folha de pagamento {cargo}')}")
+    else:
+        st.caption("Salário não disponível nas bases usadas pelo radar.")
+
     if info.get("outros_mandatos"):
         with st.expander("Histórico de mandatos e candidaturas"):
             st.markdown("\n".join(f"- {x}" for x in info["outros_mandatos"]))
