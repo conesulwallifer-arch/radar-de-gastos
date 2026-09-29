@@ -274,14 +274,16 @@ with st.sidebar:
     else:
         de, ate = _dt.date(int(atalho), 1, 1), _dt.date(int(atalho), 12, 31)
     com_periodo = atalho != "Tudo"
-de_s, ate_s = str(de), str(ate)
+de_s, ate_s = (str(de), str(ate)) if com_periodo else ("1900-01-01", "2200-12-31")
+# notas sem data (quando a fonte não informa) entram no "Tudo" e ficam fora de períodos específicos
+SEM_DATA = "DATE '2000-01-01'"
 
 # totais e alertas recalculados dentro do período
 if com_periodo:
     tot_p = q("""SELECT politico_id, sum(valor) total, count(*) n_gastos FROM gastos
-                 WHERE data BETWEEN ? AND ? GROUP BY 1""", de_s, ate_s)
+                 WHERE coalesce(data, DATE '2000-01-01') BETWEEN CAST(? AS DATE) AND CAST(? AS DATE) GROUP BY 1""", de_s, ate_s)
     al_p = q("""SELECT a.politico_id, count(*) n_alertas FROM alertas a JOIN gastos g ON g.id = a.gasto_id
-                WHERE g.data BETWEEN ? AND ? GROUP BY 1""", de_s, ate_s)
+                WHERE coalesce(g.data, DATE '2000-01-01') BETWEEN CAST(? AS DATE) AND CAST(? AS DATE) GROUP BY 1""", de_s, ate_s)
     pol = pol.drop(columns=["total", "n_gastos", "n_alertas"]).merge(tot_p, on="politico_id", how="inner").merge(al_p, on="politico_id", how="left")
     pol["n_alertas"] = pol["n_alertas"].fillna(0).astype(int)
 f = pol.copy()
@@ -354,8 +356,8 @@ with aba_rank:
     ids = base_r["politico_id"].tolist()
     if ids:
         g_r = con.execute("""SELECT fornecedor, fornecedor_doc, sum(valor) total, count(*) notas, count(DISTINCT politico_id) pagadores
-                             FROM gastos WHERE politico_id IN (SELECT unnest(?)) AND data BETWEEN ? AND ?
-                             GROUP BY 1, 2 ORDER BY total DESC LIMIT ?""", [ids, de_s, ate_s, n_top]).df()
+                             FROM gastos WHERE politico_id IN (SELECT unnest($1)) AND coalesce(data, DATE '2000-01-01') BETWEEN CAST($2 AS DATE) AND CAST($3 AS DATE)
+                             GROUP BY 1, 2 ORDER BY total DESC LIMIT $4""", [ids, de_s, ate_s, int(n_top)]).df()
         mes = con.execute("""SELECT date_trunc('month', data) mes, sum(valor) total FROM gastos
                              WHERE politico_id IN (SELECT unnest(?)) AND data BETWEEN ? AND ? GROUP BY 1 ORDER BY 1""",
                           [ids, de_s, ate_s]).df()
@@ -393,10 +395,10 @@ with aba_imp:
 
 def detalhe_politico(p, eh_orgao: bool):
     st.divider()
-    g = q("SELECT * FROM gastos WHERE politico_id = ? AND data BETWEEN ? AND ? ORDER BY data DESC", p["politico_id"], de_s, ate_s)
+    g = q("SELECT * FROM gastos WHERE politico_id = ? AND coalesce(data, DATE '2000-01-01') BETWEEN CAST(? AS DATE) AND CAST(? AS DATE) ORDER BY data DESC", p["politico_id"], de_s, ate_s)
     a = q("""SELECT a.* FROM alertas a LEFT JOIN gastos g ON g.id = a.gasto_id WHERE a.politico_id = ?
-             AND (g.data BETWEEN ? AND ? OR (a.gasto_id IS NULL AND NOT ?))
-             ORDER BY a.gravidade DESC, a.valor DESC""", p["politico_id"], de_s, ate_s, com_periodo)
+             AND coalesce(g.data, DATE '2000-01-01') BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)
+             ORDER BY a.gravidade DESC, a.valor DESC""", p["politico_id"], de_s, ate_s)
     if eh_orgao:
         st.header(f"🏛️ {p['nome']}")
         cnpj = str(p["politico_id"]).replace("ORGP-", "").replace("ORG-", "")
@@ -500,10 +502,10 @@ with aba1:
                 detalhe_politico(sel, eh_orgao=True)
 
 with aba2:
-    a = q("""SELECT a.gravidade, a.titulo, p.nome, p.cargo, p.uf, p.municipio, a.detalhe, a.valor, g.data, g.url_doc, a.gastos_ids
+    a = q("""SELECT a.gravidade, a.titulo, a.politico_id, p.nome, p.cargo, p.uf, p.municipio, a.detalhe, a.valor, g.data, g.url_doc, a.gastos_ids
              FROM alertas a JOIN politicos p USING (politico_id) LEFT JOIN gastos g ON g.id = a.gasto_id
-             WHERE g.data BETWEEN ? AND ? OR (a.gasto_id IS NULL AND NOT ?)""", de_s, ate_s, com_periodo)
-    a = a[a["nome"].isin(f["nome"])]
+             WHERE coalesce(g.data, DATE '2000-01-01') BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)""", de_s, ate_s)
+    a = a[a["politico_id"].isin(f["politico_id"])]
     tipos = st.multiselect("Tipo de alerta", sorted(a["titulo"].unique()))
     if tipos: a = a[a["titulo"].isin(tipos)]
     a = a.sort_values(["gravidade", "valor"], ascending=False).reset_index(drop=True)
@@ -531,9 +533,9 @@ with aba3:
     if doc:
         dig = "".join(ch for ch in doc if ch.isdigit())
         if len(dig) >= 8:
-            g = q("""SELECT * FROM gastos WHERE fornecedor_doc = ? AND data BETWEEN ? AND ? ORDER BY data DESC""", dig, de_s, ate_s)
+            g = q("""SELECT * FROM gastos WHERE fornecedor_doc = ? AND coalesce(data, DATE '2000-01-01') BETWEEN CAST(? AS DATE) AND CAST(? AS DATE) ORDER BY data DESC""", dig, de_s, ate_s)
         else:
-            g = q("""SELECT * FROM gastos WHERE fornecedor ILIKE ? AND data BETWEEN ? AND ? ORDER BY data DESC LIMIT 5000""", f"%{doc}%", de_s, ate_s)
+            g = q("""SELECT * FROM gastos WHERE fornecedor ILIKE ? AND coalesce(data, DATE '2000-01-01') BETWEEN CAST(? AS DATE) AND CAST(? AS DATE) ORDER BY data DESC LIMIT 5000""", f"%{doc}%", de_s, ate_s)
         if g.empty:
             st.info("Nenhuma nota encontrada para esse fornecedor no período.")
         else:
