@@ -25,7 +25,7 @@ def normalizar(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame({
         "fonte": "CEAP Câmara",
         "cargo": "Deputado Federal",
-        "politico_id": "CD-" + g("nuDeputadoId", "ideCadastro").fillna(""),
+        "politico_id": "CD-" + g("ideCadastro", "nuDeputadoId").fillna(""),
         "politico_cpf": g("cpf").map(so_digitos),
         "politico_nome": g("txNomeParlamentar").str.strip(),
         "partido": g("sgPartido"),
@@ -43,9 +43,9 @@ def normalizar(df: pd.DataFrame) -> pd.DataFrame:
         "descricao": (g("txtDescricaoEspecificacao").fillna("") + " " + g("txtPassageiro").fillna("") + " " + g("txtTrecho").fillna("")).str.strip(),
     })
     # linhas de liderança/partido (sem deputado) ficam fora
-    out = out[out["politico_nome"].notna() & ~out["politico_nome"].str.startswith("LIDERANÇA", na=False)]
+    out = out[out["politico_nome"].notna() & ~out["politico_nome"].str.upper().str.startswith(("LIDERANÇA", "LIDERANCA", "LID."), na=False)]
     # sem URL no CSV: monta o link do PDF da nota no site da Câmara
-    ide, cad, ano = g("ideDocumento").fillna(""), g("ideCadastro").fillna(""), g("numAno").fillna("")
+    ide, cad, ano = g("ideDocumento").fillna(""), g("nuDeputadoId", "ideCadastro").fillna(""), g("numAno").fillna("")
     pdf = "https://www.camara.leg.br/cota-parlamentar/documentos/publ/" + cad + "/" + ano + "/" + ide + ".pdf"
     vazio = out["url_doc"].fillna("").str.strip() == ""
     out.loc[vazio, "url_doc"] = pdf.reindex(out.index)[vazio].where(ide.reindex(out.index)[vazio] != "", "")
