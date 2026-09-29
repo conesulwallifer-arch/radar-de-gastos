@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..util import DADOS, normaliza_doc, valor_br
+from ..util import DADOS, normaliza_doc, valor_br, data_br
 from . import GASTOS
 
 PASTA = DADOS / "importar"
@@ -110,7 +110,7 @@ def coletar(municipio: str, uf: str, cands: pd.DataFrame | None = None) -> pd.Da
             "politico_cpf": "",
             "politico_nome": orgao,
             "partido": "", "uf": uf.upper(), "municipio": municipio.upper(),
-            "data": pd.to_datetime(g("data").str[:10], dayfirst=True, errors="coerce"),
+            "data": data_br(g("data")),
             "categoria": (tipo.upper() + " · " + g("categoria")).str.strip(" ·"),
             "fornecedor": g("fornecedor"),
             "fornecedor_doc": g("doc").map(normaliza_doc),
@@ -132,4 +132,15 @@ def coletar(municipio: str, uf: str, cands: pd.DataFrame | None = None) -> pd.Da
         return pd.DataFrame(columns=GASTOS)
     r = pd.concat(partes, ignore_index=True)
     r["ano"], r["mes"] = r["data"].dt.year, r["data"].dt.month
+    # empenho → liquidação → pagamento são etapas do MESMO dinheiro: por órgão e ano, fica só a etapa
+    # mais avançada disponível (pagamento > liquidação > empenho); diárias são sempre mantidas.
+    etapa = r["fonte"].str.extract(r"^(Pagamentos|Liquidações|Empenhos)")[0]
+    ordem = {"Pagamentos": 3, "Liquidações": 2, "Empenhos": 1}
+    r["_et"] = etapa.map(ordem).fillna(0)
+    r["_org"] = r["fonte"].str.contains("Câmara").map({True: "C", False: "P"})
+    melhor = r[r["_et"] > 0].groupby(["_org", "ano"])["_et"].transform("max")
+    descarta = (r["_et"] > 0) & (r["_et"] < melhor.reindex(r.index).fillna(0))
+    if descarta.any():
+        print(f"  Importar: {int(descarta.sum())} lançamentos de empenho/liquidação ignorados (já há a etapa de pagamento do mesmo ano)")
+    r = r[~descarta].drop(columns=["_et", "_org"])
     return r.reindex(columns=GASTOS, fill_value="")
