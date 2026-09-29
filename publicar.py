@@ -40,6 +40,7 @@ TRANSFORMA = {
     "receitas": {"politico_id": PID, "politico_cpf": "''", "doador_doc": CPF},
     "candidatos": {"cpf": "''", "pessoa": "substr(md5('" + SAL + "' || 'P-' || pessoa), 1, 14)"},
     "ids_externos": {"politico_id": PID},
+    "novidades": {"politico_id": PID},
     "sancoes": {"doc": CPF},
 }
 
