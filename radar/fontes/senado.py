@@ -8,7 +8,7 @@ import io
 import pandas as pd
 import requests
 
-from ..util import BRUTO, UA, baixar, col, ler_csv, so_digitos, valor_br
+from ..util import BRUTO, UA, baixar, col, data_br, ler_csv, so_digitos, valor_br
 from . import GASTOS
 
 URL_CSV = "https://www.senado.gov.br/transparencia/LAI/verba/despesa_ceaps_{ano}.csv"
@@ -46,7 +46,7 @@ def normalizar(df: pd.DataFrame) -> pd.DataFrame:
         "partido": g("partido", "siglaPartido"),
         "uf": g("uf", "siglaUF"),
         "municipio": "",
-        "data": pd.to_datetime(g("DATA", "data"), dayfirst=True, errors="coerce"),
+        "data": data_br(g("DATA", "data")),
         "ano": pd.to_numeric(g("ANO", "ano"), errors="coerce"),
         "mes": pd.to_numeric(g("MES", "mes"), errors="coerce"),
         "categoria": g("TIPO_DESPESA", "tipoDespesa").str.strip().str.upper(),
@@ -57,4 +57,44 @@ def normalizar(df: pd.DataFrame) -> pd.DataFrame:
         "url_doc": "",
     })
     out["id"] = "SF" + g("COD_DOCUMENTO", "id").astype(str) + "-" + out.index.astype(str)
-    return out[out["politico_nome"] != ""].reindex(columns=GASTOS, fill_value="")
+    out = out[out["politico_nome"] != ""]
+    return completar_senadores(out).reindex(columns=GASTOS, fill_value="")
+
+
+def _nn(s) -> str:
+    import unicodedata
+    return " ".join("".join(c for c in unicodedata.normalize("NFKD", str(s)) if not unicodedata.combining(c)).upper().split())
+
+
+def completar_senadores(out: pd.DataFrame) -> pd.DataFrame:
+    """O CSV da CEAPS não traz UF, partido nem código: completa pela API do Senado (legislaturas 55 a 58)."""
+    import json
+    arq = BRUTO / "senado" / "senadores_55_58.json"
+    try:
+        if not arq.exists():
+            r = requests.get("https://legis.senado.leg.br/dadosabertos/senador/lista/legislatura/55/58.json",
+                             headers={**UA, "Accept": "application/json"}, timeout=60)
+            r.raise_for_status()
+            arq.parent.mkdir(parents=True, exist_ok=True)
+            arq.write_text(r.text, encoding="utf-8")
+        js = json.loads(arq.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        print(f"  Senado: não consegui completar UF/partido ({e})")
+        return out
+    lista = js
+    for k in ("ListaParlamentarLegislatura", "Parlamentares", "Parlamentar"):
+        lista = lista.get(k, lista) if isinstance(lista, dict) else lista
+    mapa = {}
+    for p in lista if isinstance(lista, list) else []:
+        idp = p.get("IdentificacaoParlamentar", {})
+        info = (str(idp.get("CodigoParlamentar", "")), idp.get("UfParlamentar", ""), idp.get("SiglaPartidoParlamentar", ""))
+        for n in (idp.get("NomeParlamentar"), idp.get("NomeCompletoParlamentar")):
+            if n:
+                mapa.setdefault(_nn(n), info)
+    achado = out["politico_nome"].map(lambda n: mapa.get(_nn(n)))
+    ok = achado.notna()
+    out.loc[ok, "politico_id"] = "SF-" + achado[ok].map(lambda x: x[0])
+    out.loc[ok & (out["uf"].fillna("") == ""), "uf"] = achado[ok].map(lambda x: x[1])
+    out.loc[ok & (out["partido"].fillna("") == ""), "partido"] = achado[ok].map(lambda x: x[2])
+    print(f"  Senado: UF/partido completados para {achado[ok].map(lambda x: x[0]).nunique()} senadores")
+    return out
