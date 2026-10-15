@@ -251,52 +251,57 @@ APARENCIA = {
 
 
 def _tela(aid: str) -> str:
-    """Conteúdo do monitor (caixa 96×54) mostrando a especialidade de cada agente."""
+    """Conteúdo do monitor (caixa 96×54) mostrando a especialidade de cada agente — com animação quando trabalha."""
     if aid == "aurum":
-        return ('<text x="48" y="22" text-anchor="middle" font-family="Inter,sans-serif" font-weight="800" font-size="15" fill="#D4AF37">AURUM</text>'
-                '<rect x="10" y="32" width="14" height="14" fill="#00C176"/><rect x="28" y="28" width="14" height="18" fill="#D4AF37"/>'
-                '<rect x="46" y="35" width="14" height="11" fill="#FF4D4F"/><rect x="64" y="25" width="14" height="21" fill="#00C176"/>'
-                '<rect x="82" y="30" width="6" height="16" fill="#4DA3FF"/>')
+        barras = "".join(f'<rect class="sa-barra" style="animation-delay:{k * .25}s" x="{10 + k * 16}" y="{46 - h}" width="12" height="{h}" fill="{c}"/>'
+                         for k, (h, c) in enumerate([(14, "#00C176"), (18, "#D4AF37"), (11, "#FF4D4F"), (21, "#00C176"), (16, "#4DA3FF")]))
+        return ('<text x="48" y="20" text-anchor="middle" font-family="Inter,sans-serif" font-weight="800" font-size="14" fill="#D4AF37">AURUM</text>'
+                + barras)
     if aid == "renda":  # proventos crescendo
-        barras = "".join(f'<rect x="{8 + k * 15}" y="{46 - h}" width="10" height="{h}" fill="#D4AF37"/>' for k, h in enumerate([10, 14, 17, 22, 27, 34]))
-        return barras + '<text x="10" y="12" font-family="IBM Plex Mono,monospace" font-size="9" fill="#00C176">R$ ↑ proventos</text>'
-    if aid == "fundamentos":  # balanço com checagens
+        barras = "".join(f'<rect class="sa-cresce" style="animation-delay:{k * .3}s" x="{8 + k * 15}" y="{46 - h}" width="10" height="{h}" fill="#D4AF37"/>'
+                         for k, h in enumerate([10, 14, 17, 22, 27, 34]))
+        return barras + '<text x="10" y="11" font-family="IBM Plex Mono,monospace" font-size="8" fill="#00C176">R&#36; ↑ proventos</text>'
+    if aid == "fundamentos":  # balanço com checagens aparecendo uma a uma
         linhas = "".join(f'<rect x="8" y="{8 + k * 9}" width="52" height="4" fill="#3B4A6B"/>'
-                         f'<text x="68" y="{13 + k * 9}" font-size="8" fill="{"#00C176" if k != 3 else "#FF4D4F"}">{"✓" if k != 3 else "✗"}</text>'
-                         for k in range(5))
+                         f'<text class="sa-check" style="animation-delay:{k * .5}s" x="68" y="{13 + k * 9}" font-size="8" '
+                         f'fill="{"#00C176" if k != 3 else "#FF4D4F"}">{"✓" if k != 3 else "✗"}</text>' for k in range(5))
         return linhas + '<text x="80" y="13" font-family="IBM Plex Mono,monospace" font-size="7" fill="#8B919C">F7</text>'
-    if aid == "valuation":  # preço abaixo do preço-teto
+    if aid == "valuation":  # preço sendo desenhado abaixo do preço-teto
         return ('<line x1="4" y1="18" x2="92" y2="18" stroke="#00C176" stroke-width="1.5" stroke-dasharray="4 3"/>'
                 '<text x="70" y="14" font-family="IBM Plex Mono,monospace" font-size="7" fill="#00C176">TETO</text>'
-                '<polyline points="4,30 18,26 30,36 44,32 58,42 72,38 90,44" fill="none" stroke="#F5A623" stroke-width="2"/>'
+                '<polyline class="sa-desenha" points="4,30 18,26 30,36 44,32 58,42 72,38 90,44" fill="none" stroke="#F5A623" stroke-width="2"/>'
                 '<text x="8" y="52" font-family="IBM Plex Mono,monospace" font-size="7" fill="#8B919C">margem +23%</text>')
-    if aid == "tendencia":  # candles + média
+    if aid == "tendencia":  # candles piscando + média
         velas = ""
         for k, (o, c, hi, lo) in enumerate([(30, 22, 18, 34), (22, 28, 19, 32), (28, 18, 14, 31), (18, 24, 15, 27), (24, 14, 10, 26), (14, 20, 11, 24)]):
             cor = "#00C176" if c < o else "#FF4D4F"
             x = 10 + k * 14
-            velas += (f'<line x1="{x + 3}" y1="{hi}" x2="{x + 3}" y2="{lo}" stroke="{cor}"/>'
-                      f'<rect x="{x}" y="{min(o, c)}" width="6" height="{abs(o - c) or 1}" fill="{cor}"/>')
+            velas += (f'<g class="sa-vela" style="animation-delay:{k * .2}s"><line x1="{x + 3}" y1="{hi}" x2="{x + 3}" y2="{lo}" stroke="{cor}"/>'
+                      f'<rect x="{x}" y="{min(o, c)}" width="6" height="{abs(o - c) or 1}" fill="{cor}"/></g>')
         return velas + '<polyline points="6,30 30,26 54,22 78,18 92,16" fill="none" stroke="#4DA3FF" stroke-width="1.2"/>'
-    if aid == "noticias":  # página de jornal
-        return ('<rect x="6" y="6" width="84" height="7" fill="#E8E6E1"/><rect x="6" y="17" width="34" height="24" fill="#5E4B8B"/>'
-                + "".join(f'<rect x="44" y="{17 + k * 6}" width="46" height="3" fill="#8B919C"/>' for k in range(5))
-                + '<rect x="6" y="45" width="84" height="3" fill="#8B919C"/>')
-    if aid == "previsor":  # curva de probabilidade
+    if aid == "noticias":  # página de jornal rolando
+        corpo = "".join(f'<rect x="44" y="{17 + k * 6}" width="{46 - (k % 3) * 8}" height="3" fill="#8B919C"/>' for k in range(12))
+        return ('<defs><clipPath id="sa-clip-nina"><rect x="0" y="15" width="96" height="39"/></clipPath></defs>'
+                '<rect x="6" y="5" width="84" height="7" fill="#E8E6E1"/>'
+                f'<g clip-path="url(#sa-clip-nina)"><g class="sa-rola"><rect x="6" y="17" width="34" height="24" fill="#5E4B8B"/>{corpo}'
+                '<rect x="6" y="47" width="34" height="20" fill="#2E7D5B"/></g></g>')
+    if aid == "previsor":  # curva de probabilidade com o marcador andando
         return ('<path d="M4,48 C24,48 30,10 48,10 C66,10 72,48 92,48" fill="rgba(179,136,255,.25)" stroke="#B388FF" stroke-width="1.5"/>'
-                '<line x1="56" y1="8" x2="56" y2="48" stroke="#F5A623" stroke-dasharray="2 2"/>'
-                '<text x="60" y="18" font-family="IBM Plex Mono,monospace" font-size="8" fill="#F5A623">58%</text>')
-    if aid == "risco":  # escudo + radar
+                '<g class="sa-marcador"><line x1="56" y1="8" x2="56" y2="48" stroke="#F5A623" stroke-dasharray="2 2"/>'
+                '<text x="60" y="18" font-family="IBM Plex Mono,monospace" font-size="8" fill="#F5A623">58%</text></g>')
+    if aid == "risco":  # escudo + radar girando com alvos piscando
         return ('<circle cx="66" cy="28" r="20" fill="none" stroke="#00C176" stroke-opacity=".5"/>'
                 '<circle cx="66" cy="28" r="11" fill="none" stroke="#00C176" stroke-opacity=".5"/>'
                 '<g class="sa-radar"><line x1="66" y1="28" x2="66" y2="8" stroke="#00C176" stroke-width="2"/></g>'
+                '<circle class="sa-alvo" cx="74" cy="18" r="2" fill="#FF4D4F"/><circle class="sa-alvo" style="animation-delay:.8s" cx="58" cy="38" r="2" fill="#F5A623"/>'
                 '<path d="M18,10 L34,15 L34,28 C34,38 26,44 18,47 C10,44 2,38 2,28 L2,15 Z" fill="#2F3B2F" stroke="#00C176" stroke-width="1.5"/>'
                 '<text x="18" y="32" text-anchor="middle" font-size="12" fill="#00C176">✓</text>')
-    if aid == "atlas":  # globo + lupa
+    if aid == "atlas":  # globo + lupa explorando
         return ('<circle cx="40" cy="28" r="20" fill="#1E3A5F" stroke="#4DA3FF"/>'
-                '<ellipse cx="40" cy="28" rx="8" ry="20" fill="none" stroke="#4DA3FF"/>'
+                '<ellipse class="sa-meridiano" cx="40" cy="28" rx="8" ry="20" fill="none" stroke="#4DA3FF"/>'
                 '<line x1="20" y1="28" x2="60" y2="28" stroke="#4DA3FF"/><path d="M26,16 Q40,22 54,16 M26,40 Q40,34 54,40" fill="none" stroke="#4DA3FF"/>'
-                '<circle cx="74" cy="34" r="9" fill="none" stroke="#F5A623" stroke-width="2.5"/><line x1="80" y1="41" x2="88" y2="50" stroke="#F5A623" stroke-width="3"/>')
+                '<g class="sa-lupa"><circle cx="74" cy="34" r="9" fill="rgba(245,166,35,.12)" stroke="#F5A623" stroke-width="2.5"/>'
+                '<line x1="80" y1="41" x2="88" y2="50" stroke="#F5A623" stroke-width="3"/></g>')
     return ""
 
 
@@ -319,51 +324,74 @@ def _acessorio(tipo: str) -> str:
 
 
 def boneco(aid: str, estado: str) -> str:
-    """SVG de um agente na mesa com computador. estado muda a cena (digitando, vigiando, em pausa)."""
+    """SVG animado de um agente na mesa com computador. A cena muda com o estado:
+    trabalhando (digita, cabeça acompanha a tela), vigiando (olha de um lado a outro, mexe o mouse),
+    pausa (recosta, toma café de tempos em tempos)."""
     ap = APARENCIA.get(aid, APARENCIA["aurum"])
     ativo = estado in ("trabalhando", "vigiando")
+    pausa = not ativo and estado != "erro"
     tela_op = "1" if ativo else ".22"
     tela_brilho = {"trabalhando": "#122018", "vigiando": "#0E1A2A", "erro": "#2A1010"}.get(estado, "#0B0C0F")
-    braco = ("sa-digita" if estado == "trabalhando" else "")
+    cls_cabeca = {"trabalhando": "sa-acena", "vigiando": "sa-olha", "pausa": "sa-relaxa"}.get(estado, "")
     balao = {
         "trabalhando": '<g class="sa-pontos"><circle cx="40" cy="22" r="2.6"/><circle cx="49" cy="22" r="2.6"/><circle cx="58" cy="22" r="2.6"/></g>',
         "vigiando": '<text x="49" y="27" text-anchor="middle" font-size="13">👀</text>',
         "erro": '<text x="49" y="27" text-anchor="middle" font-size="14" fill="#FF4D4F" font-weight="800">!</text>',
     }.get(estado, '<text x="49" y="27" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" font-weight="700" fill="#8B919C" class="sa-zz">zZ</text>')
-    caneca = ('' if ativo else '<g><rect x="244" y="112" width="12" height="14" rx="2" fill="#E8E6E1"/>'
-              '<path d="M256,115 q6,2 0,8" fill="none" stroke="#E8E6E1" stroke-width="2"/>'
-              '<path class="sa-vapor" d="M248,108 q-3,-5 0,-10 M253,108 q-3,-5 0,-10" fill="none" stroke="#8B919C" stroke-width="1.4"/></g>')
-    return f'''<svg viewBox="0 0 280 200" width="100%" role="img" aria-label="{html.escape(EQUIPE_NOME.get(aid, aid))} {estado}">
+    pele, roupa = ap["pele"], ap["roupa"]
+    # braço de trás (mais escuro) e braço da frente — o que cada um faz depende do estado
+    if estado == "trabalhando":
+        braco_tras = (f'<g class="sa-tecla2"><path d="M78,94 Q98,108 116,122" fill="none" stroke="{roupa}" stroke-width="8" '
+                      f'stroke-linecap="round" opacity=".75"/><circle cx="117" cy="122" r="4" fill="{pele}" opacity=".85"/></g>')
+        braco_frente = (f'<g class="sa-tecla1"><path d="M84,92 Q106,104 128,120" fill="none" stroke="{roupa}" stroke-width="9" stroke-linecap="round"/>'
+                        f'<circle cx="130" cy="121" r="4.5" fill="{pele}"/></g>')
+    elif estado == "vigiando":
+        braco_tras = (f'<path d="M78,94 Q96,108 112,122" fill="none" stroke="{roupa}" stroke-width="8" stroke-linecap="round" opacity=".75"/>'
+                      f'<circle cx="113" cy="122" r="4" fill="{pele}" opacity=".85"/>')
+        braco_frente = (f'<g class="sa-mouse"><path d="M84,92 Q118,110 150,124" fill="none" stroke="{roupa}" stroke-width="9" stroke-linecap="round"/>'
+                        f'<circle cx="152" cy="125" r="4.5" fill="{pele}"/><ellipse cx="156" cy="129" rx="5" ry="3" fill="#30353F"/></g>')
+    else:  # pausa: segura o café e de tempos em tempos toma um gole
+        braco_tras = (f'<path d="M78,96 Q88,112 100,118" fill="none" stroke="{roupa}" stroke-width="8" stroke-linecap="round" opacity=".75"/>'
+                      f'<circle cx="101" cy="118" r="4" fill="{pele}" opacity=".85"/>')
+        braco_frente = (f'<g class="sa-gole"><path d="M84,92 Q104,108 118,118" fill="none" stroke="{roupa}" stroke-width="9" stroke-linecap="round"/>'
+                        f'<circle cx="120" cy="118" r="4.5" fill="{pele}"/>'
+                        '<rect x="117" y="104" width="11" height="13" rx="2" fill="#E8E6E1"/>'
+                        '<path d="M128,107 q5,2 0,7" fill="none" stroke="#E8E6E1" stroke-width="2"/>'
+                        '<path class="sa-vapor" d="M120,100 q-3,-5 0,-10 M125,100 q-3,-5 0,-10" fill="none" stroke="#8B919C" stroke-width="1.4"/></g>')
+    gravata = _acessorio("gravata") if ap["acessorio"] == "gravata" else ""
+    outros = _acessorio(ap["acessorio"]) if ap["acessorio"] != "gravata" else ""
+    olho = '<g class="sa-olhos"><circle cx="92" cy="60" r="1.8" fill="#1A1A1A"/></g>' if not pausa else \
+           '<path d="M89,61 q3,2 6,0" fill="none" stroke="#1A1A1A" stroke-width="1.6" stroke-linecap="round"/>'
+    return f"""<svg viewBox="0 0 280 200" width="100%" role="img" aria-label="{html.escape(EQUIPE_NOME.get(aid, aid))} {estado}">
   <rect width="280" height="132" fill="#15171C"/><rect y="132" width="280" height="68" fill="#0E1013"/>
   <line x1="0" y1="132" x2="280" y2="132" stroke="#262A33"/>
   <rect x="196" y="14" width="64" height="38" rx="2" fill="#0F1114" stroke="#262A33"/>
   <polyline points="200,44 212,36 222,40 234,26 246,30 256,20" fill="none" stroke="#2C3340" stroke-width="2"/>
   <g transform="translate(14,4)"><rect x="12" y="8" width="74" height="30" rx="15" fill="#20242C" stroke="#30353F"/>
-    <path d="M30,37 L26,46 L38,37 Z" fill="#20242C"/>
-    <g fill="#E8E6E1">{balao}</g></g>
-  <rect x="30" y="96" width="38" height="8" rx="3" fill="#2A2E36"/><rect x="32" y="104" width="6" height="40" fill="#2A2E36"/>
-  <rect x="24" y="144" width="54" height="5" rx="2" fill="#2A2E36"/>
-  <rect x="66" y="80" width="30" height="44" rx="10" fill="{ap["roupa"]}"/>
-  {_acessorio("gravata") if ap["acessorio"] == "gravata" else ""}
-  <rect x="70" y="122" width="40" height="10" rx="5" fill="#2B2F38"/>
-  <rect x="104" y="122" width="8" height="34" rx="3" fill="#2B2F38"/>
-  <g class="{braco}"><path d="M84,92 Q104,104 122,120" fill="none" stroke="{ap["roupa"]}" stroke-width="9" stroke-linecap="round"/>
-    <circle cx="124" cy="121" r="4.5" fill="{ap["pele"]}"/></g>
-  <rect x="76" y="70" width="10" height="12" fill="{ap["pele"]}"/>
-  <circle cx="83" cy="60" r="15" fill="{ap["pele"]}"/>
-  {_cabelo(ap["estilo"], ap["cabelo"])}
-  <circle cx="92" cy="60" r="1.8" fill="#1A1A1A"/>
-  {_acessorio(ap["acessorio"]) if ap["acessorio"] != "gravata" else ""}
+    <path d="M30,37 L26,46 L38,37 Z" fill="#20242C"/><g fill="#E8E6E1">{balao}</g></g>
+  <g class="{"sa-cadeira" if pausa else ""}"><rect x="30" y="96" width="38" height="8" rx="3" fill="#2A2E36"/>
+    <rect x="32" y="{"88" if pausa else "104"}" width="6" height="{"56" if pausa else "40"}" fill="#2A2E36"/></g>
+  <rect x="24" y="144" width="54" height="5" rx="2" fill="#2A2E36"/><rect x="48" y="149" width="4" height="30" fill="#2A2E36"/>
+  <rect x="34" y="179" width="34" height="4" rx="2" fill="#2A2E36"/>
+  {braco_tras}
+  <g class="sa-respira {"sa-recosta" if pausa else ""}">
+    <rect x="66" y="80" width="30" height="44" rx="10" fill="{roupa}"/>{gravata}
+    <g class="{cls_cabeca}"><rect x="76" y="70" width="10" height="12" fill="{pele}"/>
+      <circle cx="83" cy="60" r="15" fill="{pele}"/>{_cabelo(ap["estilo"], ap["cabelo"])}{olho}{outros}</g>
+  </g>
+  <rect x="70" y="122" width="40" height="10" rx="5" fill="#2B2F38"/><rect x="104" y="122" width="8" height="34" rx="3" fill="#2B2F38"/>
+  <rect x="100" y="156" width="16" height="5" rx="2" fill="#1A1C21"/>
   <rect x="100" y="132" width="172" height="10" rx="2" fill="#5C4326"/><rect x="104" y="142" width="6" height="50" fill="#4A361F"/>
   <rect x="262" y="142" width="6" height="50" fill="#4A361F"/>
   <rect x="116" y="126" width="40" height="6" rx="1.5" fill="#30353F"/>
+  {braco_frente}
   <rect x="182" y="116" width="8" height="16" fill="#30353F"/><rect x="170" y="129" width="32" height="4" rx="1" fill="#30353F"/>
   <rect x="136" y="56" width="104" height="62" rx="4" fill="{tela_brilho}" stroke="#3A404C" stroke-width="2"/>
-  <g transform="translate(140,60)" opacity="{tela_op}" class="{"sa-tela" if ativo else ""}">{_tela(aid)}</g>
-  {caneca}
+  <g transform="translate(140,60)" opacity="{tela_op}" class="{"sa-tela sa-anima" if ativo else ""}">{_tela(aid)}</g>
+  {"" if ativo else '<text x="188" y="94" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#3A404C">em pausa</text>'}
   <rect x="210" y="133" width="58" height="9" rx="1" fill="#D4AF37"/>
   <text x="239" y="140.5" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="7" font-weight="700" fill="#111">{html.escape(EQUIPE_NOME.get(aid, aid).upper())}</text>
-</svg>'''
+</svg>"""
 
 
 EQUIPE_NOME = {"aurum": "AURUM", "renda": "Dora", "fundamentos": "Fausto", "valuation": "Vitória", "tendencia": "Téo",
@@ -381,15 +409,52 @@ CSS_SALA = """
 .sa-nome { font-weight:800; } .sa-cargo { font-size:.78rem; color: var(--apagado); }
 .sa-tarefa { font-size:.84rem; margin-top:4px; min-height:2.5em; line-height:1.35; }
 .sa-hora { font-family: var(--mono); font-size:.7rem; color: var(--apagado); }
-.sa-digita { animation: digita .35s ease-in-out infinite alternate; transform-origin: 84px 92px; }
-@keyframes digita { from { transform: rotate(-2deg); } to { transform: rotate(3deg) translateY(1px); } }
+.sa-baia svg * { transform-box: fill-box; }
+/* corpo: todos respiram */
+.sa-respira { animation: respira 3.2s ease-in-out infinite; transform-origin: 50% 100%; }
+@keyframes respira { 50% { transform: translateY(-1.2px) scaleY(1.01); } }
+.sa-recosta { transform: rotate(-6deg); transform-origin: 30% 100%; animation: recosta 3.6s ease-in-out infinite; }
+@keyframes recosta { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(-7.5deg) translateY(-1px); } }
+/* trabalhando: digita com as duas mãos e acompanha a tela */
+.sa-tecla1 { animation: tecla .32s ease-in-out infinite alternate; transform-origin: 0% 0%; }
+.sa-tecla2 { animation: tecla .32s ease-in-out infinite alternate-reverse; transform-origin: 0% 0%; }
+@keyframes tecla { from { transform: translateY(-1.5px) rotate(-1.5deg); } to { transform: translateY(1.2px) rotate(1.5deg); } }
+.sa-acena { animation: acena 1.8s ease-in-out infinite; transform-origin: 40% 100%; }
+@keyframes acena { 0%, 100% { transform: rotate(0deg); } 30% { transform: rotate(4deg); } 60% { transform: rotate(-1deg); } }
+/* vigiando: olha de um lado a outro e mexe o mouse */
+.sa-olha { animation: olha 4s ease-in-out infinite; transform-origin: 40% 100%; }
+@keyframes olha { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(6deg); } 50% { transform: rotate(-4deg); } 75% { transform: rotate(3deg); } }
+.sa-olhos { animation: olhos 4s ease-in-out infinite; }
+@keyframes olhos { 25% { transform: translateX(2px); } 50% { transform: translateX(-2px); } }
+.sa-mouse { animation: mouse 2.2s ease-in-out infinite; }
+@keyframes mouse { 25% { transform: translate(3px, -1px); } 50% { transform: translate(-2px, 1px); } 75% { transform: translate(2px, 1px); } }
+/* pausa: toma café de tempos em tempos */
+.sa-gole { animation: gole 7s ease-in-out infinite; transform-origin: 0% 0%; }
+@keyframes gole { 0%, 55%, 100% { transform: rotate(0); } 68%, 82% { transform: rotate(-62deg) translate(-6px, -4px); } }
+.sa-relaxa { animation: relaxa 7s ease-in-out infinite; transform-origin: 40% 100%; }
+@keyframes relaxa { 0%, 55%, 100% { transform: rotate(-4deg); } 68%, 82% { transform: rotate(-12deg); } }
+/* balões e telas */
 .sa-pontos circle { animation: ponto 1.2s infinite; } .sa-pontos circle:nth-child(2) { animation-delay: .2s; } .sa-pontos circle:nth-child(3) { animation-delay: .4s; }
 @keyframes ponto { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
-.sa-tela { animation: brilho 3s ease-in-out infinite; } @keyframes brilho { 50% { opacity: .82; } }
-.sa-radar { transform-origin: 66px 28px; animation: gira 2.4s linear infinite; } @keyframes gira { to { transform: rotate(360deg); } }
 .sa-zz { animation: flutua 2.6s ease-in-out infinite; } @keyframes flutua { 50% { transform: translateY(-3px); opacity:.6; } }
-.sa-vapor { animation: flutua 2s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { .sa-digita, .sa-pontos circle, .sa-tela, .sa-radar, .sa-zz, .sa-vapor { animation: none !important; } }
+.sa-vapor { animation: vapor 2s ease-in-out infinite; } @keyframes vapor { 0% { opacity:0; transform: translateY(2px); } 50% { opacity:1; } 100% { opacity:0; transform: translateY(-4px); } }
+.sa-tela { animation: brilho 3s ease-in-out infinite; } @keyframes brilho { 50% { opacity: .85; } }
+.sa-anima .sa-barra { animation: barra 1.6s ease-in-out infinite; transform-origin: 50% 100%; }
+@keyframes barra { 50% { transform: scaleY(.55); } }
+.sa-anima .sa-cresce { animation: cresce 2.4s ease-out infinite; transform-origin: 50% 100%; }
+@keyframes cresce { 0% { transform: scaleY(.15); } 60%, 100% { transform: scaleY(1); } }
+.sa-anima .sa-check { animation: check 2.5s steps(1) infinite; } @keyframes check { 0% { opacity: 0; } 20%, 100% { opacity: 1; } }
+.sa-anima .sa-desenha { stroke-dasharray: 130; animation: desenha 2.8s ease-in-out infinite; }
+@keyframes desenha { 0% { stroke-dashoffset: 130; } 70%, 100% { stroke-dashoffset: 0; } }
+.sa-anima .sa-vela { animation: vela 1.4s ease-in-out infinite; } @keyframes vela { 50% { transform: translateY(-2px); opacity: .6; } }
+.sa-anima .sa-rola { animation: rola 5s linear infinite; } @keyframes rola { from { transform: translateY(0); } to { transform: translateY(-30px); } }
+.sa-anima .sa-marcador { animation: marcador 3s ease-in-out infinite; } @keyframes marcador { 50% { transform: translateX(-18px); } }
+.sa-anima .sa-radar { transform-origin: 50% 100%; animation: gira 2.4s linear infinite; } @keyframes gira { to { transform: rotate(360deg); } }
+.sa-anima .sa-alvo { animation: alvo 1.6s ease-in-out infinite; } @keyframes alvo { 50% { opacity: .1; } }
+.sa-anima .sa-meridiano { transform-origin: 50% 50%; animation: meridiano 3s ease-in-out infinite; } @keyframes meridiano { 50% { transform: scaleX(.2); } }
+.sa-anima .sa-lupa { animation: lupa 4s ease-in-out infinite; }
+@keyframes lupa { 25% { transform: translate(-30px, -10px); } 50% { transform: translate(-44px, 4px); } 75% { transform: translate(-18px, 8px); } }
+@media (prefers-reduced-motion: reduce) { .sa-baia svg * { animation: none !important; } }
 </style>
 """
 
