@@ -82,3 +82,53 @@ def test_alerta_novo_provento_e_oportunidade():
     rk["ultimo_provento_data"] = "2026-09-15"
     tipos = {a["tipo"] for a in alertas.gerar(rk, ant, {}, hoje=HOJE.date())}
     assert {"Provento", "Oportunidade"} <= tipos
+
+
+# ---------------------------------------------------------------- meta, backtest, confiança
+from acoes import backtest, meta  # noqa: E402
+
+
+def test_meta_caminho_medio_e_aporte_necessario():
+    # sem rendimento: 1.000/mês leva exatamente 100 meses para 100 mil
+    assert meta.meses_ate(100_000, 0, 1000, 0.0) == 100
+    ap = meta.aporte_necessario(1_000_000, 0, 0.10, 240)
+    assert meta.meses_ate(1_000_000, 0, ap, 0.10) <= 240
+    assert meta.meses_ate(1_000_000, 0, ap * 0.97, 0.10) > 240
+    assert meta.fmt_tempo(25) == "2 anos e 1 mês"
+
+
+def test_meta_monte_carlo_coerente():
+    r = meta.simular(1_000_000, 0, 2000, 0.12, 0.20, n=2000)
+    assert r["meses_10"] < r["meses_50"] < r["meses_90"]
+    med = meta.meses_ate(1_000_000, 0, 2000, 0.12)
+    assert abs(r["meses_50"] - med) <= 24  # mediana perto do caminho médio (um pouco mais conservadora)
+    assert r["faixas"]["chance_ate_ano"].is_monotonic_increasing
+    # sem oscilação, todas as simulações batem no mesmo mês do caminho médio
+    r0 = meta.simular(1_000_000, 0, 2000, 0.12, 0.0001, n=200)
+    assert abs(r0["meses_50"] - med) <= 1
+
+
+def test_backtest_tir_e_sem_olhar_o_futuro():
+    base = {f"B{n}A3": ativo(f"B{n}A3", preco=10 + n) for n in range(4)}
+    cdi = pd.Series(1.10 ** (1 / 12) - 1, index=pd.period_range("2021-01", "2026-12", freq="M"))
+    r = backtest.rodar(base, anos=3, aporte=1000, cdi=cdi, hoje=HOJE.date())
+    assert r["investido"] == 1000 * r["meses"]
+    assert r["tir_cdi"] == pytest.approx(0.10, abs=0.002)
+    # um provento gigante em out/2025 só no B0A3 não pode mudar o que foi escolhido ANTES dessa data
+    corte = pd.Timestamp("2025-10-10")
+    fut = dict(base)
+    d0 = base["B0A3"]
+    fut["B0A3"] = {**d0, "proventos": pd.concat([d0["proventos"], pd.Series([999.0], index=[corte])]).sort_index()}
+    r2 = backtest.rodar(fut, anos=3, cdi=cdi, hoje=HOJE.date())
+    antes = lambda c: c[pd.to_datetime(c["mes"]) <= corte].reset_index(drop=True)  # noqa: E731
+    assert antes(r2["compras"]).equals(antes(r["compras"]))
+    assert r2["sistema"] != r["sistema"]  # depois da data, o provento entra na conta
+
+
+def test_confianca_detecta_dado_estranho():
+    d = ativo("ESTR3")
+    d["info"]["currentPrice"] = 20.0  # preço da cotação diverge do histórico (10)
+    i = analise.ranking({"ESTR3": d}, hoje=HOJE).iloc[0]
+    assert i["confianca"] == "Baixa" and i["sinal"] != "Comprar"
+    ok = analise.ranking({"BOA3": ativo("BOA3")}, hoje=HOJE).iloc[0]
+    assert ok["confianca"] == "Alta" and "pagou em 9" in ok["por_que"]

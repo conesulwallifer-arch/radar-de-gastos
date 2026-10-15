@@ -19,11 +19,15 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, DADOS, alertas, analise, aporte, dados, demo, noticias, previsao, universo  # noqa: E402
+from acoes import AVISO, DADOS, alertas, analise, aporte, backtest, dados, demo, macro, meta, noticias, plano, previsao, universo  # noqa: E402
 
 HIST = DADOS / "historico"
 REL = DADOS / "relatorios"
 ULTIMO = DADOS / "ultimo.pkl"
+
+
+def _tx(x: float) -> str:
+    return f"{x * 100:.2f}%".replace(".", ",")
 
 
 def anterior(hoje: date) -> pd.DataFrame | None:
@@ -67,10 +71,36 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
             print(f"  [aviso] previsão de {r['ticker']}: {e}")
     rk = rk.merge(pd.DataFrame(prev), on="ticker", how="left")
 
-    print("5/5 Gerando alertas e relatório...")
+    print("5/5 Juros (Banco Central), teste no passado, meta e alertas...")
+    mac = macro.indicadores()
+    ibov = demo.gerar("BOVA11")["precos"] if usar_demo else (dados.coletar("BOVA11", forcar=forcar) or {}).get("precos")
+    cdi, cdi_real = macro.cdi_mensal(date(hoje.year - 6, 1, 1))
+    try:
+        bt = backtest.rodar(base, anos=5, aporte=valor_aporte or 1000.0, cdi=cdi, ibov=ibov)
+        bt["cdi_real"] = cdi_real
+    except Exception as e:  # noqa: BLE001
+        print(f"  [aviso] teste no passado falhou: {e}")
+        bt = None
+    pl = plano.ler()
+    if valor_aporte:
+        pl["aporte_mensal"] = valor_aporte
+    esc = aporte.escolher(rk, 10, 2)
+    cart_esp = meta.carteira_esperada(esc)
+    pat = plano.patrimonio_atual(pl, cart, rk)
+    inflacao = mac["ipca_12m"] if pl["corrigir_inflacao"] else 0.0
+    sim = meta.simular(pl["meta"], pat, pl["aporte_mensal"], cart_esp["retorno"], cart_esp["volatilidade"],
+                       pl["aumento_aporte_aa"], inflacao)
+
     alts = alertas.gerar(rk, anterior(hoje), news, carteira=cart["ticker"].tolist())
     compras, sobra = aporte.sugerir(rk, valor_aporte, cart) if valor_aporte > 0 else (pd.DataFrame(), 0.0)
     texto = alertas.texto_resumo(rk, alts, compras, sobra=sobra)
+    datas = rk["data_cotacao"].dropna()
+    cab = [f"Cotações de {pd.Timestamp(datas.max()):%d/%m/%Y} (Yahoo Finance)." if len(datas) else "",
+           f"Selic {_tx(mac['selic'])} · IPCA 12m {_tx(mac['ipca_12m'])} · renda fixa líquida ≈ {_tx(mac['cdi_liquido'])} a.a."
+           + (" (estimado, Banco Central fora do ar)" if mac["estimado"] else " (Banco Central)"),
+           f"🎯 Meta {alertas._fmt_r(pl['meta'])}: patrimônio hoje {alertas._fmt_r(pat)}, aportando {alertas._fmt_r(pl['aporte_mensal'])}/mês "
+           f"→ metade das simulações chega em {meta.fmt_tempo(sim['meses_50'])}; 9 em 10 chegam em até {meta.fmt_tempo(sim['meses_90'])}."]
+    texto = "\n".join(c for c in cab if c) + "\n\n" + texto
     if sem_dados:
         texto += f"\n\nSem dados hoje (código pode ter mudado na B3): {', '.join(sem_dados)}"
     if usar_demo:
@@ -82,7 +112,8 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
                  "compras": compras, "sobra": sobra, "aporte": valor_aporte, "sem_dados": sem_dados,
                  "precos": {t: d["precos"] for t, d in base.items()},
                  "proventos": {t: d["proventos"] for t, d in base.items()},
-                 "info": {t: d["info"] for t, d in base.items()}}
+                 "info": {t: d["info"] for t, d in base.items()},
+                 "macro": mac, "backtest": bt, "carteira_esperada": cart_esp, "ibov": ibov}
     with open(ULTIMO, "wb") as f:
         pickle.dump(resultado, f)
 

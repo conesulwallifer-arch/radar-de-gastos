@@ -25,11 +25,13 @@ No Windows, dê dois cliques em **`Apurar Acoes.bat`** (apuração) e **`Abrir P
 
 | Aba | O que mostra |
 |---|---|
+| ✅ O que fazer hoje | Em português simples: **quais ações comprar este mês, quantas cotas, quanto custa e por quê**, com link para conferir no Status Invest; sua meta; os alertas mais importantes. |
+| 🎯 Rumo ao R$ 1 milhão | 5.000 simulações da bolsa: **tempo até a meta com anos bons, o mais provável e com anos ruins**, chance de chegar até cada ano, o que te leva mais rápido, quanto aportar para chegar em X anos e a comparação com a renda fixa (Selic real do Banco Central). |
+| 🧪 O sistema funciona? | **Teste no passado**: R$ X por mês nos últimos 5 anos seguindo o sistema (só com o que se sabia em cada mês) × CDI × Ibovespa. |
+| 💼 Minha carteira | Suas ações, quanto valem hoje, resultado e renda estimada. |
 | 🏆 Ranking | Todas as ações com nota, sinal, preço, preço-teto (Bazin), preço justo (Graham), DY 12m / médio 5 anos / previsto, anos pagando, ROE, P/L, P/VP, dívida, payout e meses em que costuma pagar. Filtros por setor, sinal e DY mínimo. |
 | 🔔 Alertas | Oportunidades novas, queda forte de ação boa, novo provento anunciado, data-com chegando, mudanças no top 10, ação da sua carteira que piorou, notícias negativas relevantes. |
 | 🏢 Empresa | Gráfico de 5 anos com o preço-teto, proventos ano a ano, histórico de pagamentos, previsão de preço (pessimista/mediana/otimista), proventos previstos, indicadores, notícias com tom (🟢/🔴) e assunto, descrição do negócio. |
-| 🛒 Aporte do mês | Digite o valor do aporte e (opcional) sua carteira atual: o sistema diz **quantas cotas comprar de cada ação**, diversificando por setor e completando o que está abaixo do peso-alvo. |
-| 📊 Simulador | Aportes mensais + reinvestimento dos proventos por N anos, 3 cenários, e **em quanto tempo você chega à renda passiva desejada**. |
 
 ## Alertas diários automáticos
 
@@ -49,7 +51,7 @@ O relatório de cada dia também fica em *Actions → execução → Artifacts*.
 
 ## Sua carteira
 
-Crie `dados_acoes/carteira.csv` (ou edite na aba **Aporte do mês**):
+Crie `dados_acoes/carteira.csv` (ou edite na aba **💼 Minha carteira**):
 
 ```csv
 ticker,quantidade,preco_medio
@@ -81,10 +83,25 @@ Para mudar a lista de ações analisadas, crie `dados_acoes/minha_lista.txt` com
   faixa de 80% de probabilidade pela volatilidade histórica.
 - **Carteira**: aportes mensais com reinvestimento dos proventos, cenários pessimista/base/otimista (valores nominais).
 
+## Dá para confiar?
+
+O sistema foi feito para ser **verificável**, não para pedir fé:
+- Todo número mostra **de quando é** (data da cotação no topo; aviso se tiver mais de 3 dias úteis).
+- Cada ação passa por uma **checagem de confiança** (cotação velha, preço divergente entre fontes, provento fora do normal,
+  dado faltando). Dado duvidoso **nunca** vira "Comprar".
+- Cada recomendação diz **por quê**, em português, e tem um link para conferir no Status Invest.
+- O **teste no passado** mostra como o método teria se saído, com os limites escritos na tela.
+- O simulador mostra **chances**, não promessas, e compara com a renda fixa: se a Selic estiver alta, ele te diz que a
+  renda fixa pode chegar lá tão rápido quanto.
+
+O que nenhum sistema faz: prever o preço de amanhã ou garantir R$ 1 milhão. O caminho até a meta depende
+principalmente de **quanto você aporta e por quanto tempo**; o sistema faz a lição de casa diária para você investir bem esse dinheiro.
+
 ## Fontes e limites
 
 - Cotações, proventos (dividendos + JCP pela data-ex, valores brutos) e indicadores: **Yahoo Finance** (biblioteca `yfinance`).
   Pode haver atraso ou falhas pontuais; se um código mudar na B3, ele aparece em "sem dados".
+- Selic, IPCA e CDI: **Banco Central do Brasil** (API oficial SGS).
 - Notícias: **Google Notícias** (RSS). O tom (positiva/negativa) é uma classificação simples por palavras-chave.
 - JCP tem 15% de IR retido na fonte; dividendos são isentos (regra vigente pode mudar — confira).
 
@@ -103,6 +120,10 @@ acoes/dados.py       Yahoo Finance com cache diário
 acoes/analise.py     indicadores, preço-teto, preço justo, nota e sinal
 acoes/previsao.py    proventos 12m, faixa de preço, simulador de aportes
 acoes/aporte.py      sugestão de compra do mês e revisão da carteira
+acoes/meta.py        simulação até a meta (Monte Carlo), alavancas, aporte necessário
+acoes/backtest.py    teste no passado × CDI × Ibovespa
+acoes/macro.py       Selic, IPCA e CDI do Banco Central
+acoes/plano.py       seu plano (aporte, meta) salvo em dados_acoes/plano.json
 acoes/alertas.py     alertas do dia, Telegram e e-mail
 acoes/noticias.py    Google Notícias + tom e assunto
 acoes/demo.py        dados fictícios para testar sem internet

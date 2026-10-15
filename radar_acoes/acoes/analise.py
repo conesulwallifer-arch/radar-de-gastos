@@ -97,8 +97,12 @@ def indicadores(d: dict, hoje: pd.Timestamp | None = None) -> dict:
     margem_graham = graham / preco - 1 if graham == graham and preco else np.nan
 
     alvo = _num(info.get("targetMeanPrice"))
+    preco_hist = float(precos.iloc[-1]) if not precos.empty else np.nan
     return {
         "ticker": t, "nome": info.get("longName") or info.get("shortName") or t,
+        "data_cotacao": precos.index[-1].date().isoformat() if not precos.empty else None,
+        "preco_historico": preco_hist,
+        "proventos_mediana_pagamento": float(prov[prov.index > hoje - pd.DateOffset(years=5)].median()) if not prov.empty else np.nan,
         "setor": universo.setor(t, info.get("sector")), "preco": preco, "var_dia": var_dia, "var_12m": var12,
         "dy_12m": ult12 / preco if preco else np.nan, "dy_medio_5a": media5 / preco if preco else np.nan,
         "proventos_12m": ult12, "proventos_media_5a": media5, "proventos_media_3a": media3,
@@ -187,6 +191,61 @@ def sinal(i: dict) -> str:
     return "Evitar"
 
 
+def confianca(i: dict, hoje: pd.Timestamp | None = None) -> tuple[str, list[str]]:
+    """Confere se os dados fazem sentido. Retorna ('Alta'|'Média'|'Baixa', avisos)."""
+    hoje = hoje or pd.Timestamp(date.today())
+    avisos, grave = [], False
+    if i.get("data_cotacao"):
+        atraso = len(pd.bdate_range(pd.Timestamp(i["data_cotacao"]), hoje)) - 1
+        if atraso > 4:
+            avisos.append(f"cotação desatualizada (última de {pd.Timestamp(i['data_cotacao']):%d/%m/%Y})")
+            grave = True
+    ph, p = i.get("preco_historico"), i.get("preco")
+    if ph == ph and p and abs(p / ph - 1) > 0.10:
+        avisos.append(f"preço diferente entre as fontes (R$ {p:.2f} × R$ {ph:.2f})")
+        grave = True
+    if i["dy_12m"] == i["dy_12m"] and i["dy_12m"] > 0.25:
+        avisos.append("DY dos últimos 12 meses acima de 25%: provável provento extraordinário (não se repete) ou erro")
+    up, med = i.get("ultimo_provento_valor"), i.get("proventos_mediana_pagamento")
+    if up == up and med == med and med and up > 4 * med:
+        avisos.append("último provento muito acima do normal (extraordinário?)")
+    if i["lpa"] != i["lpa"] or i["vpa"] != i["vpa"]:
+        avisos.append("lucro ou patrimônio por ação não informados pela fonte")
+    if i["anos_historico"] < 5:
+        avisos.append(f"pouco histórico na bolsa ({i['anos_historico']} anos)")
+    nivel = "Baixa" if grave or len(avisos) >= 3 else "Média" if avisos else "Alta"
+    return nivel, avisos
+
+
+def _p(x) -> str:
+    return f"{x * 100:.1f}%".replace(".", ",")
+
+
+def _r(x) -> str:
+    return f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def explicar(i: dict) -> str:
+    """Por que a ação está onde está, em português simples."""
+    partes = []
+    if i["proventos_media_5a"] > 0:
+        partes.append(f"paga em média {_r(i['proventos_media_5a'])} por ação por ano ({_p(i['dy_medio_5a'])} do preço de hoje) "
+                      f"e pagou em {i['anos_pagou_10']} dos últimos {min(10, i['anos_historico'])} anos")
+    else:
+        partes.append("não pagou proventos nos últimos anos")
+    mb = i["margem_bazin"]
+    if mb == mb:
+        partes.append(f"está {_p(mb)} abaixo do preço-teto" if mb >= 0 else f"está {_p(-mb)} acima do preço-teto (cara para renda)")
+    if i["roe"] == i["roe"]:
+        partes.append(f"lucra {_p(i['roe'])} ao ano sobre o patrimônio (ROE)")
+    if i["lpa"] == i["lpa"] and i["lpa"] <= 0:
+        partes.append("está dando PREJUÍZO")
+    if i["queda_max_5a"] == i["queda_max_5a"] and i["queda_max_5a"] < -0.45:
+        partes.append(f"já caiu {_p(-i['queda_max_5a'])} do topo nos últimos 5 anos (oscila muito)")
+    texto = "; ".join(partes)
+    return texto[0].upper() + texto[1:] + "."
+
+
 def ranking(dados: dict[str, dict], noticias_saldo: dict[str, float] | None = None,
             hoje: pd.Timestamp | None = None) -> pd.DataFrame:
     noticias_saldo = noticias_saldo or {}
@@ -198,7 +257,13 @@ def ranking(dados: dict[str, dict], noticias_saldo: dict[str, float] | None = No
             print(f"  [aviso] {t}: não deu para calcular ({e})")
             continue
         i.update(nota(i, noticias_saldo.get(t, 0.0)))
+        i["confianca"], avisos = confianca(i, hoje)
+        i["avisos_dados"] = " · ".join(avisos)
         i["sinal"] = sinal(i)
+        if i["sinal"] == "Comprar" and i["confianca"] == "Baixa":
+            i["sinal"] = "Acumular"  # dado duvidoso: não damos "Comprar" sem conferir
+        i["por_que"] = explicar(i)
+        i["conferir"] = f"https://statusinvest.com.br/acoes/{t.lower()}"
         linhas.append(i)
     if not linhas:
         return pd.DataFrame()
