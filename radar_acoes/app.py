@@ -210,9 +210,11 @@ with abas[1]:
         for aid, (nome_, ic, cargo) in escritorio.EQUIPE.items():
             e = stt.get(aid, {})
             desde = e.get("desde", "")
-            mesas.append({"icone": ic, "nome": nome_, "cargo": cargo, "estado": e.get("estado", "pausa"),
+            mesas.append({"id": aid, "icone": ic, "nome": nome_, "cargo": cargo, "estado": e.get("estado", "pausa"),
                           "tarefa": e.get("tarefa", ""), "desde": f"desde {pd.Timestamp(desde):%d/%m %H:%M}" if desde else ""})
-        visual.escritorio(mesas)
+        agora_sala = datetime.now(ZoneInfo("America/Sao_Paulo"))
+        visual.sala_ilustrada(mesas, agora_sala.weekday() < 5 and (10, 0) <= (agora_sala.hour, agora_sala.minute) < (17, 55),
+                              agora_sala.hour)
         di = escritorio.ler_diario(60)
         if di:
             nomes_ = {k: f"{v[1]} {v[0]}" for k, v in escritorio.EQUIPE.items()}

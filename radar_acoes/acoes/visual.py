@@ -99,26 +99,7 @@ h2, h3 { font-size: .95rem !important; font-weight: 800 !important; text-transfo
 .ag-console { font-family: var(--mono); font-size:.82rem; line-height:1.6; color:#C9D1D9; background:#07080A;
   border:1px solid var(--borda); border-radius:4px; padding:10px 12px; max-height:340px; overflow:auto; }
 .ag-console .h { color: var(--ambar); margin-right:8px; }
-/* ---------- escritório ---------- */
-.of-sala { display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:10px; margin:6px 0 12px; }
-.of-mesa { border:1px solid var(--borda); border-radius:4px; background: var(--painel); padding:12px; position:relative; }
-.of-mesa.trabalhando { border-color: rgba(0,193,118,.55); box-shadow: 0 0 0 1px rgba(0,193,118,.15) inset; }
-.of-mesa.vigiando { border-color: rgba(77,163,255,.55); }
-.of-mesa.erro { border-color: rgba(255,77,79,.6); }
-.of-cab { display:flex; align-items:center; gap:10px; }
-.of-av { font-size:1.6rem; width:44px; height:44px; display:flex; align-items:center; justify-content:center; border-radius:4px;
-  background: var(--painel2); border:1px solid var(--borda); }
-.of-nome { font-weight:800; }
-.of-cargo { font-size:.8rem; color: var(--apagado); }
-.of-luz { position:absolute; top:10px; right:10px; font-family: var(--mono); font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; }
-.of-luz.trabalhando { color: var(--verde); } .of-luz.vigiando { color: var(--azul); } .of-luz.pausa { color: var(--apagado); }
-.of-luz.erro { color: var(--vermelho); }
-.of-luz.trabalhando::before, .of-luz.vigiando::before { content:"●"; margin-right:4px; animation: pisca 1.2s infinite; }
-.of-luz.pausa::before { content:"○"; margin-right:4px; }
-.of-tarefa { margin-top:10px; font-size:.86rem; line-height:1.4; color: var(--texto); min-height:2.6em; }
-.of-tarefa.trabalhando::after { content:"▍"; color: var(--verde); animation: pisca .9s infinite; margin-left:2px; }
-.of-hora { font-family: var(--mono); font-size:.72rem; color: var(--apagado); margin-top:6px; }
-@media (prefers-reduced-motion: reduce) { .au-fita-trilho, .au-chip.on::before, .of-luz::before, .of-tarefa::after { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .au-fita-trilho, .au-chip.on::before { animation: none !important; } }
 @media (max-width: 640px) { .au-nome { font-size:1.4rem; letter-spacing:.2em; } .au-chips { justify-content:flex-start; } }
 </style>
 """
@@ -252,16 +233,210 @@ def floco(pcts: dict[str, float], graus: dict[str, str], tamanho: int = 300) -> 
     st.markdown(f'<div style="display:flex;justify-content:center">{svg}</div>', unsafe_allow_html=True)
 
 
-def escritorio(mesas: list[dict]) -> None:
-    """mesas: [{'icone','nome','cargo','estado','tarefa','desde'}] — a sala com cada agente na sua mesa."""
-    rot = {"trabalhando": "trabalhando", "vigiando": "vigiando", "pausa": "em pausa", "erro": "atenção"}
-    blocos = []
+
+
+# ------------------------------------------------------------------ sala ilustrada (bonecos em mesas com computador)
+# Aparência de cada agente: pele, cabelo, estilo do cabelo, roupa e acessório
+APARENCIA = {
+    "aurum":       {"pele": "#E0AC69", "cabelo": "#2B1B10", "estilo": "curto", "roupa": "#1F2430", "acessorio": "gravata"},
+    "renda":       {"pele": "#F1C27D", "cabelo": "#8B4513", "estilo": "longo", "roupa": "#2E7D5B", "acessorio": ""},
+    "fundamentos": {"pele": "#C68642", "cabelo": "#9E9E9E", "estilo": "curto", "roupa": "#3B4A6B", "acessorio": "oculos"},
+    "valuation":   {"pele": "#FFDBAC", "cabelo": "#C9A227", "estilo": "longo", "roupa": "#7A2E4A", "acessorio": ""},
+    "tendencia":   {"pele": "#8D5524", "cabelo": "#111111", "estilo": "curto", "roupa": "#1E5F8C", "acessorio": ""},
+    "noticias":    {"pele": "#E0AC69", "cabelo": "#B5452B", "estilo": "longo", "roupa": "#5E4B8B", "acessorio": "oculos"},
+    "previsor":    {"pele": "#F1C27D", "cabelo": "#3A2A5C", "estilo": "longo", "roupa": "#4B3A7A", "acessorio": "tiara"},
+    "risco":       {"pele": "#C68642", "cabelo": "#1A1A1A", "estilo": "curto", "roupa": "#2F3B2F", "acessorio": "bone"},
+    "atlas":       {"pele": "#FFDBAC", "cabelo": "#6B4423", "estilo": "curto", "roupa": "#6B5B3E", "acessorio": "chapeu"},
+}
+
+
+def _tela(aid: str) -> str:
+    """Conteúdo do monitor (caixa 96×54) mostrando a especialidade de cada agente."""
+    if aid == "aurum":
+        return ('<text x="48" y="22" text-anchor="middle" font-family="Inter,sans-serif" font-weight="800" font-size="15" fill="#D4AF37">AURUM</text>'
+                '<rect x="10" y="32" width="14" height="14" fill="#00C176"/><rect x="28" y="28" width="14" height="18" fill="#D4AF37"/>'
+                '<rect x="46" y="35" width="14" height="11" fill="#FF4D4F"/><rect x="64" y="25" width="14" height="21" fill="#00C176"/>'
+                '<rect x="82" y="30" width="6" height="16" fill="#4DA3FF"/>')
+    if aid == "renda":  # proventos crescendo
+        barras = "".join(f'<rect x="{8 + k * 15}" y="{46 - h}" width="10" height="{h}" fill="#D4AF37"/>' for k, h in enumerate([10, 14, 17, 22, 27, 34]))
+        return barras + '<text x="10" y="12" font-family="IBM Plex Mono,monospace" font-size="9" fill="#00C176">R$ ↑ proventos</text>'
+    if aid == "fundamentos":  # balanço com checagens
+        linhas = "".join(f'<rect x="8" y="{8 + k * 9}" width="52" height="4" fill="#3B4A6B"/>'
+                         f'<text x="68" y="{13 + k * 9}" font-size="8" fill="{"#00C176" if k != 3 else "#FF4D4F"}">{"✓" if k != 3 else "✗"}</text>'
+                         for k in range(5))
+        return linhas + '<text x="80" y="13" font-family="IBM Plex Mono,monospace" font-size="7" fill="#8B919C">F7</text>'
+    if aid == "valuation":  # preço abaixo do preço-teto
+        return ('<line x1="4" y1="18" x2="92" y2="18" stroke="#00C176" stroke-width="1.5" stroke-dasharray="4 3"/>'
+                '<text x="70" y="14" font-family="IBM Plex Mono,monospace" font-size="7" fill="#00C176">TETO</text>'
+                '<polyline points="4,30 18,26 30,36 44,32 58,42 72,38 90,44" fill="none" stroke="#F5A623" stroke-width="2"/>'
+                '<text x="8" y="52" font-family="IBM Plex Mono,monospace" font-size="7" fill="#8B919C">margem +23%</text>')
+    if aid == "tendencia":  # candles + média
+        velas = ""
+        for k, (o, c, hi, lo) in enumerate([(30, 22, 18, 34), (22, 28, 19, 32), (28, 18, 14, 31), (18, 24, 15, 27), (24, 14, 10, 26), (14, 20, 11, 24)]):
+            cor = "#00C176" if c < o else "#FF4D4F"
+            x = 10 + k * 14
+            velas += (f'<line x1="{x + 3}" y1="{hi}" x2="{x + 3}" y2="{lo}" stroke="{cor}"/>'
+                      f'<rect x="{x}" y="{min(o, c)}" width="6" height="{abs(o - c) or 1}" fill="{cor}"/>')
+        return velas + '<polyline points="6,30 30,26 54,22 78,18 92,16" fill="none" stroke="#4DA3FF" stroke-width="1.2"/>'
+    if aid == "noticias":  # página de jornal
+        return ('<rect x="6" y="6" width="84" height="7" fill="#E8E6E1"/><rect x="6" y="17" width="34" height="24" fill="#5E4B8B"/>'
+                + "".join(f'<rect x="44" y="{17 + k * 6}" width="46" height="3" fill="#8B919C"/>' for k in range(5))
+                + '<rect x="6" y="45" width="84" height="3" fill="#8B919C"/>')
+    if aid == "previsor":  # curva de probabilidade
+        return ('<path d="M4,48 C24,48 30,10 48,10 C66,10 72,48 92,48" fill="rgba(179,136,255,.25)" stroke="#B388FF" stroke-width="1.5"/>'
+                '<line x1="56" y1="8" x2="56" y2="48" stroke="#F5A623" stroke-dasharray="2 2"/>'
+                '<text x="60" y="18" font-family="IBM Plex Mono,monospace" font-size="8" fill="#F5A623">58%</text>')
+    if aid == "risco":  # escudo + radar
+        return ('<circle cx="66" cy="28" r="20" fill="none" stroke="#00C176" stroke-opacity=".5"/>'
+                '<circle cx="66" cy="28" r="11" fill="none" stroke="#00C176" stroke-opacity=".5"/>'
+                '<g class="sa-radar"><line x1="66" y1="28" x2="66" y2="8" stroke="#00C176" stroke-width="2"/></g>'
+                '<path d="M18,10 L34,15 L34,28 C34,38 26,44 18,47 C10,44 2,38 2,28 L2,15 Z" fill="#2F3B2F" stroke="#00C176" stroke-width="1.5"/>'
+                '<text x="18" y="32" text-anchor="middle" font-size="12" fill="#00C176">✓</text>')
+    if aid == "atlas":  # globo + lupa
+        return ('<circle cx="40" cy="28" r="20" fill="#1E3A5F" stroke="#4DA3FF"/>'
+                '<ellipse cx="40" cy="28" rx="8" ry="20" fill="none" stroke="#4DA3FF"/>'
+                '<line x1="20" y1="28" x2="60" y2="28" stroke="#4DA3FF"/><path d="M26,16 Q40,22 54,16 M26,40 Q40,34 54,40" fill="none" stroke="#4DA3FF"/>'
+                '<circle cx="74" cy="34" r="9" fill="none" stroke="#F5A623" stroke-width="2.5"/><line x1="80" y1="41" x2="88" y2="50" stroke="#F5A623" stroke-width="3"/>')
+    return ""
+
+
+def _cabelo(estilo: str, cor: str) -> str:
+    if estilo == "longo":
+        return (f'<path d="M62,64 C60,46 72,38 82,40 C94,42 98,52 96,62 L98,92 C92,88 88,80 88,70 L74,70 C72,80 68,88 62,92 Z" fill="{cor}"/>')
+    return f'<path d="M64,60 C64,44 76,38 84,40 C94,42 98,50 96,58 C90,52 80,50 70,54 Z" fill="{cor}"/>'
+
+
+def _acessorio(tipo: str) -> str:
+    return {
+        "gravata": '<path d="M80,86 L86,86 L84,92 L88,112 L83,118 L78,112 L82,92 Z" fill="#D4AF37"/>',
+        "oculos": '<g fill="none" stroke="#111" stroke-width="1.6"><circle cx="86" cy="62" r="4.5"/><circle cx="96" cy="62" r="4.5"/>'
+                  '<line x1="90.5" y1="62" x2="91.5" y2="62"/></g>',
+        "tiara": '<path d="M66,50 Q80,36 96,48" fill="none" stroke="#B388FF" stroke-width="3"/><circle cx="81" cy="41" r="2.5" fill="#F5A623"/>',
+        "bone": '<path d="M64,52 C66,38 92,36 96,50 Z" fill="#2F3B2F"/><path d="M92,50 L108,52 L94,55 Z" fill="#2F3B2F"/>',
+        "chapeu": '<ellipse cx="81" cy="46" rx="24" ry="5" fill="#8B6B3E"/><path d="M68,46 C68,32 94,32 94,46 Z" fill="#8B6B3E"/>'
+                  '<rect x="68" y="42" width="26" height="3" fill="#5A4426"/>',
+    }.get(tipo, "")
+
+
+def boneco(aid: str, estado: str) -> str:
+    """SVG de um agente na mesa com computador. estado muda a cena (digitando, vigiando, em pausa)."""
+    ap = APARENCIA.get(aid, APARENCIA["aurum"])
+    ativo = estado in ("trabalhando", "vigiando")
+    tela_op = "1" if ativo else ".22"
+    tela_brilho = {"trabalhando": "#122018", "vigiando": "#0E1A2A", "erro": "#2A1010"}.get(estado, "#0B0C0F")
+    braco = ("sa-digita" if estado == "trabalhando" else "")
+    balao = {
+        "trabalhando": '<g class="sa-pontos"><circle cx="40" cy="22" r="2.6"/><circle cx="49" cy="22" r="2.6"/><circle cx="58" cy="22" r="2.6"/></g>',
+        "vigiando": '<text x="49" y="27" text-anchor="middle" font-size="13">👀</text>',
+        "erro": '<text x="49" y="27" text-anchor="middle" font-size="14" fill="#FF4D4F" font-weight="800">!</text>',
+    }.get(estado, '<text x="49" y="27" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" font-weight="700" fill="#8B919C" class="sa-zz">zZ</text>')
+    caneca = ('' if ativo else '<g><rect x="244" y="112" width="12" height="14" rx="2" fill="#E8E6E1"/>'
+              '<path d="M256,115 q6,2 0,8" fill="none" stroke="#E8E6E1" stroke-width="2"/>'
+              '<path class="sa-vapor" d="M248,108 q-3,-5 0,-10 M253,108 q-3,-5 0,-10" fill="none" stroke="#8B919C" stroke-width="1.4"/></g>')
+    return f'''<svg viewBox="0 0 280 200" width="100%" role="img" aria-label="{html.escape(EQUIPE_NOME.get(aid, aid))} {estado}">
+  <rect width="280" height="132" fill="#15171C"/><rect y="132" width="280" height="68" fill="#0E1013"/>
+  <line x1="0" y1="132" x2="280" y2="132" stroke="#262A33"/>
+  <rect x="196" y="14" width="64" height="38" rx="2" fill="#0F1114" stroke="#262A33"/>
+  <polyline points="200,44 212,36 222,40 234,26 246,30 256,20" fill="none" stroke="#2C3340" stroke-width="2"/>
+  <g transform="translate(14,4)"><rect x="12" y="8" width="74" height="30" rx="15" fill="#20242C" stroke="#30353F"/>
+    <path d="M30,37 L26,46 L38,37 Z" fill="#20242C"/>
+    <g fill="#E8E6E1">{balao}</g></g>
+  <rect x="30" y="96" width="38" height="8" rx="3" fill="#2A2E36"/><rect x="32" y="104" width="6" height="40" fill="#2A2E36"/>
+  <rect x="24" y="144" width="54" height="5" rx="2" fill="#2A2E36"/>
+  <rect x="66" y="80" width="30" height="44" rx="10" fill="{ap["roupa"]}"/>
+  {_acessorio("gravata") if ap["acessorio"] == "gravata" else ""}
+  <rect x="70" y="122" width="40" height="10" rx="5" fill="#2B2F38"/>
+  <rect x="104" y="122" width="8" height="34" rx="3" fill="#2B2F38"/>
+  <g class="{braco}"><path d="M84,92 Q104,104 122,120" fill="none" stroke="{ap["roupa"]}" stroke-width="9" stroke-linecap="round"/>
+    <circle cx="124" cy="121" r="4.5" fill="{ap["pele"]}"/></g>
+  <rect x="76" y="70" width="10" height="12" fill="{ap["pele"]}"/>
+  <circle cx="83" cy="60" r="15" fill="{ap["pele"]}"/>
+  {_cabelo(ap["estilo"], ap["cabelo"])}
+  <circle cx="92" cy="60" r="1.8" fill="#1A1A1A"/>
+  {_acessorio(ap["acessorio"]) if ap["acessorio"] != "gravata" else ""}
+  <rect x="100" y="132" width="172" height="10" rx="2" fill="#5C4326"/><rect x="104" y="142" width="6" height="50" fill="#4A361F"/>
+  <rect x="262" y="142" width="6" height="50" fill="#4A361F"/>
+  <rect x="116" y="126" width="40" height="6" rx="1.5" fill="#30353F"/>
+  <rect x="182" y="116" width="8" height="16" fill="#30353F"/><rect x="170" y="129" width="32" height="4" rx="1" fill="#30353F"/>
+  <rect x="136" y="56" width="104" height="62" rx="4" fill="{tela_brilho}" stroke="#3A404C" stroke-width="2"/>
+  <g transform="translate(140,60)" opacity="{tela_op}" class="{"sa-tela" if ativo else ""}">{_tela(aid)}</g>
+  {caneca}
+  <rect x="210" y="133" width="58" height="9" rx="1" fill="#D4AF37"/>
+  <text x="239" y="140.5" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="7" font-weight="700" fill="#111">{html.escape(EQUIPE_NOME.get(aid, aid).upper())}</text>
+</svg>'''
+
+
+EQUIPE_NOME = {"aurum": "AURUM", "renda": "Dora", "fundamentos": "Fausto", "valuation": "Vitória", "tendencia": "Téo",
+               "noticias": "Nina", "previsor": "Íris", "risco": "Rex", "atlas": "Atlas"}
+
+CSS_SALA = """
+<style>
+.sa-parede { position:relative; border:1px solid var(--borda); border-radius:6px 6px 0 0; overflow:hidden; background:#121419; }
+.sa-chao { display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:0; border:1px solid var(--borda);
+  border-top:none; border-radius:0 0 6px 6px; background:#0E1013; margin-bottom:14px; }
+.sa-baia { border-right:1px solid #1C1F26; border-bottom:1px solid #1C1F26; padding:8px 10px 12px; }
+.sa-baia.trabalhando { background: linear-gradient(180deg, rgba(0,193,118,.06), transparent 60%); }
+.sa-baia.vigiando { background: linear-gradient(180deg, rgba(77,163,255,.07), transparent 60%); }
+.sa-info { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-top:2px; }
+.sa-nome { font-weight:800; } .sa-cargo { font-size:.78rem; color: var(--apagado); }
+.sa-tarefa { font-size:.84rem; margin-top:4px; min-height:2.5em; line-height:1.35; }
+.sa-hora { font-family: var(--mono); font-size:.7rem; color: var(--apagado); }
+.sa-digita { animation: digita .35s ease-in-out infinite alternate; transform-origin: 84px 92px; }
+@keyframes digita { from { transform: rotate(-2deg); } to { transform: rotate(3deg) translateY(1px); } }
+.sa-pontos circle { animation: ponto 1.2s infinite; } .sa-pontos circle:nth-child(2) { animation-delay: .2s; } .sa-pontos circle:nth-child(3) { animation-delay: .4s; }
+@keyframes ponto { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+.sa-tela { animation: brilho 3s ease-in-out infinite; } @keyframes brilho { 50% { opacity: .82; } }
+.sa-radar { transform-origin: 66px 28px; animation: gira 2.4s linear infinite; } @keyframes gira { to { transform: rotate(360deg); } }
+.sa-zz { animation: flutua 2.6s ease-in-out infinite; } @keyframes flutua { 50% { transform: translateY(-3px); opacity:.6; } }
+.sa-vapor { animation: flutua 2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .sa-digita, .sa-pontos circle, .sa-tela, .sa-radar, .sa-zz, .sa-vapor { animation: none !important; } }
+</style>
+"""
+
+
+def _parede(pregao: bool, hora: int) -> str:
+    noite = hora >= 18 or hora < 6
+    ceu = "#0B1426" if noite else "#5B8DB8"
+    predios = "".join(f'<rect x="{x}" y="{y}" width="{w}" height="{90 - y}" fill="{"#0A0F1A" if noite else "#3E5F7E"}"/>'
+                      for x, y, w in [(6, 40, 18), (26, 28, 14), (42, 46, 20), (64, 22, 12), (78, 36, 18)])
+    luzes = "".join(f'<rect x="{x}" y="{y}" width="2" height="2" fill="#F5D76E"/>' for x, y in
+                    [(10, 48), (16, 60), (30, 34), (46, 54), (52, 66), (68, 30), (82, 44), (88, 58)]) if noite else ""
+    janela = f'<g><rect width="100" height="90" fill="{ceu}"/>{predios}{luzes}<rect width="100" height="90" fill="none" stroke="#2A2E36" stroke-width="4"/><line x1="50" y1="0" x2="50" y2="90" stroke="#2A2E36" stroke-width="3"/></g>'
+    placa = ("PREGÃO ABERTO" if pregao else "PREGÃO FECHADO")
+    cor = "#00C176" if pregao else "#8B919C"
+    return f'''<svg viewBox="0 0 1000 120" width="100%" role="img" aria-label="Sala da equipe AURUM">
+  <rect width="1000" height="120" fill="#15171C"/>
+  <g transform="translate(40,14)">{janela}</g><g transform="translate(860,14)">{janela}</g>
+  <rect x="300" y="18" width="400" height="74" rx="6" fill="#0A0B0D" stroke="#D4AF37" stroke-width="2"/>
+  <text x="500" y="52" text-anchor="middle" font-family="Inter,sans-serif" font-weight="800" font-size="26" letter-spacing="8" fill="#D4AF37">AURUM</text>
+  <text x="500" y="76" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="12" letter-spacing="3" fill="#8B919C">MESA DE OPERAÇÕES · <tspan fill="{cor}">● {placa}</tspan></text>
+  <g transform="translate(176,30)"><circle r="22" fill="#0F1114" stroke="#30353F" stroke-width="3"/>
+    <line x1="0" y1="0" x2="0" y2="-14" stroke="#E8E6E1" stroke-width="2.5" transform="rotate({(hora % 12) * 30})"/>
+    <line x1="0" y1="0" x2="0" y2="-18" stroke="#F5A623" stroke-width="1.5" transform="rotate(0)"/></g>
+  <rect x="740" y="40" width="70" height="52" rx="4" fill="#1E5A3A"/><circle cx="775" cy="38" r="16" fill="#2E7D5B"/><circle cx="762" cy="46" r="12" fill="#2E7D5B"/><circle cx="788" cy="46" r="12" fill="#2E7D5B"/>
+  <line x1="0" y1="118" x2="1000" y2="118" stroke="#262A33" stroke-width="2"/>
+</svg>'''
+
+
+def _uma_linha(svg: str) -> str:
+    """O Streamlit trata o HTML como markdown: linha em branco encerra o bloco e '$' vira fórmula. Tudo numa linha e '$' escapado."""
+    return re.sub(r"\n\s*", " ", svg).replace("$", "&#36;")
+
+
+def sala_ilustrada(mesas: list[dict], pregao: bool, hora: int) -> None:
+    """A sala: parede com janelas e o painel da mesa de operações; embaixo, cada agente na sua baia."""
+    rot = {"trabalhando": "● trabalhando", "vigiando": "● vigiando", "pausa": "○ em pausa", "erro": "! atenção"}
+    cor = {"trabalhando": "var(--verde)", "vigiando": "var(--azul)", "pausa": "var(--apagado)", "erro": "var(--vermelho)"}
+    baias = []
     for m in mesas:
         e = m.get("estado", "pausa")
-        blocos.append(
-            f'<div class="of-mesa {e}"><span class="of-luz {e}">{rot.get(e, e)}</span><div class="of-cab">'
-            f'<div class="of-av">{m["icone"]}</div><div><div class="of-nome">{html.escape(m["nome"])}</div>'
-            f'<div class="of-cargo">{html.escape(m["cargo"])}</div></div></div>'
-            f'<div class="of-tarefa {e}">{html.escape(m.get("tarefa") or "aguardando a primeira tarefa")}</div>'
-            f'<div class="of-hora">{html.escape(m.get("desde") or "")}</div></div>')
-    st.markdown(f'<div class="of-sala">{"".join(blocos)}</div>', unsafe_allow_html=True)
+        baias.append(
+            f'<div class="sa-baia {e}">{_uma_linha(boneco(m["id"], e))}'
+            f'<div class="sa-info"><div><span class="sa-nome">{html.escape(m["nome"])}</span> '
+            f'<span class="sa-cargo">· {html.escape(m["cargo"])}</span></div>'
+            f'<span class="sa-hora" style="color:{cor.get(e)}">{rot.get(e, e)}</span></div>'
+            f'<div class="sa-tarefa">{html.escape(m.get("tarefa") or "aguardando a primeira tarefa")}</div>'
+            f'<div class="sa-hora">{html.escape(m.get("desde") or "")}</div></div>')
+    st.markdown(_uma_linha(CSS_SALA) + f'<div class="sa-parede">{_uma_linha(_parede(pregao, hora))}</div>'
+                f'<div class="sa-chao">{"".join(baias)}</div>',
+                unsafe_allow_html=True)

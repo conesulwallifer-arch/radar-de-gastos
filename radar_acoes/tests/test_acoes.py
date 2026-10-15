@@ -351,3 +351,13 @@ def test_alertas_toleram_datas_ausentes():
     ant = rk.copy()
     tipos = {a["tipo"] for a in alertas.gerar(rk, ant, {}, hoje=HOJE.date())}
     assert "Balanço" in tipos and "Data-com" in tipos and "Provento" not in tipos
+
+
+def test_sala_ilustrada_desenha_todos_os_agentes():
+    from acoes import visual
+    for aid in escritorio.EQUIPE:
+        for estado in ("trabalhando", "vigiando", "pausa", "erro"):
+            svg = visual._uma_linha(visual.boneco(aid, estado))
+            assert svg.startswith("<svg") and svg.endswith("</svg>")
+            assert "\n" not in svg and "$" not in svg  # o Streamlit não pode quebrar o desenho
+            assert visual.EQUIPE_NOME[aid].upper() in svg  # plaquinha com o nome na mesa
