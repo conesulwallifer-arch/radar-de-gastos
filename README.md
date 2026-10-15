@@ -81,3 +81,8 @@ app.py              app local (Streamlit)
 radar/fontes/       camara.py, senado.py, tse.py, empresas.py
 radar/detectores.py regras de irregularidade e índice de atenção
 ```
+
+## Radar de Ações (projeto à parte)
+
+A pasta [`radar_acoes/`](radar_acoes/README.md) tem um sistema independente de **ações para renda passiva** (dividendos e JCP):
+ranking diário com nota, preço-teto, previsões, notícias, sugestão do aporte mensal e alertas por Telegram/e-mail.

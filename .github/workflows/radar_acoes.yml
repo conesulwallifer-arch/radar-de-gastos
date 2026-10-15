@@ -1,0 +1,72 @@
+name: Radar de Ações — agente AURUM
+
+on:
+  schedule:
+    - cron: "30 21 * * 1-5"    # dias úteis, 18h30 de Brasília: apuração completa + relatório do AURUM
+    - cron: "15 13-20 * * 1-5" # dias úteis, de hora em hora das 10h15 às 17h15 de Brasília: vigilância do pregão
+    - cron: "0 13 * * 6"       # sábado, 10h de Brasília: reunião semanal
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "agora = apuração completa; checar = só vigilância de preços; semanal = reunião semanal"
+        required: false
+        default: "agora"
+
+concurrency:
+  group: radar-acoes
+  cancel-in-progress: false
+
+jobs:
+  aurum:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: radar_acoes
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: radar_acoes/requirements.txt
+      - run: pip install -r requirements.txt
+      # guarda a última apuração, o histórico e o estado da vigilância entre execuções
+      - uses: actions/cache@v4
+        with:
+          path: radar_acoes/dados_acoes
+          key: radar-acoes-${{ github.run_id }}
+          restore-keys: radar-acoes-
+      - name: Seu plano e carteira (opcional, dos segredos)
+        env:
+          CARTEIRA_CSV: ${{ secrets.CARTEIRA_CSV }}
+          PLANO_JSON: ${{ secrets.PLANO_JSON }}
+        run: |
+          mkdir -p dados_acoes
+          if [ -n "$CARTEIRA_CSV" ]; then printf '%s\n' "$CARTEIRA_CSV" > dados_acoes/carteira.csv; fi
+          if [ -n "$PLANO_JSON" ]; then printf '%s\n' "$PLANO_JSON" > dados_acoes/plano.json; fi
+      - name: AURUM trabalhando
+        env:
+          TZ: America/Sao_Paulo
+          APORTE_MENSAL: ${{ vars.APORTE_MENSAL }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
+          EMAIL_SENHA: ${{ secrets.EMAIL_SENHA }}
+          EMAIL_DESTINO: ${{ secrets.EMAIL_DESTINO }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ "${{ github.event.schedule }}" = "15 13-20 * * 1-5" ] || [ "${{ github.event.inputs.modo }}" = "checar" ]; then
+            python agente.py --checar
+          elif [ "${{ github.event.schedule }}" = "0 13 * * 6" ] || [ "${{ github.event.inputs.modo }}" = "semanal" ]; then
+            python agente.py --semanal
+          else
+            python agente.py --agora
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relatorio-aurum
+          path: radar_acoes/dados_acoes/relatorios/
+          if-no-files-found: ignore
+          retention-days: 30
