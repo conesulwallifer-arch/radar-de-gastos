@@ -19,7 +19,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, DADOS, alertas, analise, aporte, backtest, dados, demo, jarvis, macro, meta, noticias, plano, previsao, universo  # noqa: E402
+from acoes import AVISO, DADOS, alertas, analise, aporte, backtest, dados, demo, jarvis, macro, memoria, mesa, meta, noticias, plano, previsao, previsor, universo  # noqa: E402
 
 HIST = DADOS / "historico"
 REL = DADOS / "relatorios"
@@ -36,7 +36,8 @@ def anterior(hoje: date) -> pd.DataFrame | None:
 
 
 def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = False, com_noticias: bool = True,
-           enviar: bool = True, forcar: bool = False, usar_ia: bool = True) -> dict:
+           enviar: bool = True, forcar: bool = False, usar_ia: bool = True, progresso=None) -> dict:
+    falar = progresso or (lambda m: None)
     hoje = date.today()
     HIST.mkdir(parents=True, exist_ok=True)
     REL.mkdir(parents=True, exist_ok=True)
@@ -44,6 +45,7 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     tickers = list(dict.fromkeys(tickers + cart["ticker"].tolist()))
 
     print(f"1/5 Coletando preços, proventos e indicadores de {len(tickers)} ações...")
+    falar(f"📡 Coletando cotações, proventos e balanços de {len(tickers)} empresas...")
     base = {t: demo.gerar(t) for t in tickers} if usar_demo else dados.coletar_varios(tickers, forcar=forcar)
     sem_dados = [t for t in tickers if t not in base]
     if not base:
@@ -53,6 +55,7 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     rk = analise.ranking(base)
 
     print("3/5 Buscando notícias...")
+    falar("📰 Buscando as notícias das 30 primeiras e da sua carteira...")
     news: dict[str, list[dict]] = {}
     if com_noticias:
         alvo = list(dict.fromkeys(rk.head(30)["ticker"].tolist() + cart["ticker"].tolist()))
@@ -63,6 +66,7 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
         rk = analise.ranking(base, {t: noticias.resumo(v)["saldo"] for t, v in news.items()})
 
     print("4/5 Fazendo previsões...")
+    falar("📊 Calculando previsões de proventos e de preço (1, 3 e 5 anos)...")
     prev = []
     for _, r in rk.iterrows():
         try:
@@ -72,6 +76,7 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     rk = rk.merge(pd.DataFrame(prev), on="ticker", how="left")
 
     print("5/5 Juros (Banco Central), teste no passado, meta e alertas...")
+    falar("🏦 Consultando Selic e inflação no Banco Central e refazendo o teste dos últimos 5 anos...")
     mac = macro.indicadores()
     ibov = demo.gerar("BOVA11")["precos"] if usar_demo else (dados.coletar("BOVA11", forcar=forcar) or {}).get("precos")
     cdi, cdi_real = macro.cdi_mensal(date(hoje.year - 6, 1, 1))
@@ -91,6 +96,49 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     sim = meta.simular(pl["meta"], pat, pl["aporte_mensal"], cart_esp["retorno"], cart_esp["volatilidade"],
                        pl["aumento_aporte_aa"], inflacao)
 
+    print("🔮 Previsor: chance de alta/queda no próximo mês + teste de acerto no passado...")
+    falar("🔮 **Íris** está calculando a chance de alta/queda no próximo mês e conferindo o próprio placar de acertos...")
+    precos_base = {t: d["precos"] for t, d in base.items()}
+    prev_cp = previsor.prever_todas(precos_base)
+    validacao = previsor.validar_historico(precos_base)
+    validacao.pop("casos", None)
+    prev_cal, fator = previsor.calibrar(prev_cp, validacao)
+    if len(prev_cp):
+        if not usar_demo:  # dados fictícios nunca entram no placar real
+            previsor.registrar(prev_cp.assign(direcao=prev_cp["prob_alta"].map(previsor.direcao)),
+                               dict(zip(rk["ticker"], rk["preco"])), hoje)
+        rk = rk.merge(prev_cal[["ticker", "prob_alta", "prob_bruta", "direcao", "ret_mediano", "ret_p10", "ret_p90"]]
+                      .rename(columns={"prob_alta": "prob_alta_1m", "prob_bruta": "prob_alta_1m_bruta", "direcao": "direcao_1m",
+                                       "ret_mediano": "ret_mediano_1m", "ret_p10": "ret_p10_1m", "ret_p90": "ret_p90_1m"}),
+                      on="ticker", how="left")
+    placar = previsor.placar_real(precos_base)
+
+    print("🧠 Mesa de analistas: 7 agentes analisando cada ação...")
+    falar("🧠 Cada agente está consultando a própria memória (votos passados × o que aconteceu de verdade)...")
+    proventos_base = {t: d["proventos"] for t, d in base.items()}
+    cerebro = memoria.avaliar(precos_base, proventos_base)
+    aprendizado = memoria.fatores(cerebro)
+    falar("🧠 Reunião da mesa de analistas começou.")
+    reuniao = mesa.reuniao(rk, precos_base, news, mac, prev_cal, fator, cart, str(hoje), usar_ia=usar_ia,
+                           progresso=falar, aprendizado=aprendizado, cerebro=cerebro)
+    reuniao["cerebro"] = cerebro
+    if not usar_demo:  # dados fictícios nunca entram na memória dos agentes
+        memoria.registrar(reuniao["opinioes"], dict(zip(rk["ticker"], rk["preco"])), hoje)
+    rk = rk.merge(reuniao["consenso"], on="ticker", how="left")
+    for linha in reuniao["log"]:
+        print("   " + linha)
+    # dupla checagem: só fica "Comprar/Acumular" se a nota do sistema E a mesa de agentes concordarem
+    rk["checagem"] = "ok"
+    vetar = rk["vetado"].fillna(False) & rk["sinal"].isin(["Comprar", "Acumular"])
+    rk.loc[vetar, "checagem"] = "vetada por " + rk.loc[vetar, "vetado_por"].fillna("")
+    discorda = ~vetar & rk["sinal"].isin(["Comprar", "Acumular"]) & rk["consenso"].isin(["Evitar"])
+    rk.loc[discorda, "checagem"] = "a mesa de agentes não confirmou"
+    rebaixa = rk["sinal"].isin(["Comprar", "Acumular"]) & (rk["checagem"] != "ok")
+    rk.loc[rebaixa, "sinal"] = "Aguardar"
+    rk.loc[rk["sinal"].eq("Comprar") & rk["consenso"].eq("Neutro"), "sinal"] = "Acumular"
+    print(f"   🤖 JARVIS (dupla checagem): {int(rebaixa.sum())} ação(ões) tiradas das compras por falta de confirmação.")
+    falar(f"🤖 **JARVIS** fez a dupla checagem (nota do sistema × mesa): {int(rebaixa.sum())} ação(ões) saíram da lista de compras.")
+
     alts = alertas.gerar(rk, anterior(hoje), news, carteira=cart["ticker"].tolist())
     compras, sobra = aporte.sugerir(rk, valor_aporte, cart) if valor_aporte > 0 else (pd.DataFrame(), 0.0)
     texto = alertas.texto_resumo(rk, alts, compras, sobra=sobra)
@@ -106,14 +154,17 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     if usar_demo:
         texto = "⚠️ MODO DEMONSTRAÇÃO — DADOS FICTÍCIOS\n\n" + texto
 
-    rk.drop(columns=["meses_pagamento", "proximos_meses"], errors="ignore").to_csv(HIST / f"ranking_{hoje:%Y-%m-%d}.csv", index=False)
+    if not usar_demo:  # o histórico (base dos alertas de "mudou desde ontem") só guarda dados reais
+        rk.drop(columns=["meses_pagamento", "proximos_meses"], errors="ignore").to_csv(HIST / f"ranking_{hoje:%Y-%m-%d}.csv", index=False)
     resultado = {"data": hoje, "demo": usar_demo, "ranking": rk, "noticias": news, "alertas": alts,
                  "compras": compras, "sobra": sobra, "aporte": valor_aporte, "sem_dados": sem_dados,
                  "precos": {t: d["precos"] for t, d in base.items()},
                  "proventos": {t: d["proventos"] for t, d in base.items()},
                  "info": {t: d["info"] for t, d in base.items()},
-                 "macro": mac, "backtest": bt, "carteira_esperada": cart_esp, "ibov": ibov}
+                 "macro": mac, "backtest": bt, "carteira_esperada": cart_esp, "ibov": ibov,
+                 "mesa": reuniao, "previsor": {"validacao": validacao, "fator": fator, "placar_real": placar}}
     print("🤖 JARVIS escrevendo o relatório do dia" + (" (IA + pesquisa na web)..." if usar_ia and jarvis.ia_disponivel() else "..."))
+    falar("🤖 **JARVIS** está escrevendo o relatório do dia...")
     resultado["jarvis"] = jarvis.relatorio(resultado, pl, usar_ia=usar_ia)
     texto = "🤖 J.A.R.V.I.S.\n\n" + resultado["jarvis"]["texto"].replace("**", "") + "\n\n" + "─" * 20 + "\n\n" + texto
     (REL / f"relatorio_{hoje:%Y-%m-%d}.txt").write_text(texto, encoding="utf-8")

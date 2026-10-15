@@ -171,3 +171,50 @@ def test_vigia_avisa_uma_vez_por_dia(tmp_path, monkeypatch):
     novos = vigia.checar(R, [], fake)
     assert len(novos) == 2 and any("preço-teto" in n for n in novos) and any("cai 5,0%" in n for n in novos)
     assert vigia.checar(R, [], fake) == []
+
+
+# ---------------------------------------------------------------- mesa, verificação cruzada, memória, previsor
+from acoes import memoria, mesa, previsor  # noqa: E402
+
+
+def test_mesa_vota_veta_e_confere():
+    R = _R()
+    rk = R["ranking"]
+    rk.loc[0, "lpa"] = -0.3  # prejuízo → Rex veta
+    rk.loc[1, "payout"] = 0.97  # quase todo o lucro vira provento: Dora aprova, Fausto contesta
+    m = mesa.reuniao(rk, {r["ticker"]: ativo(r["ticker"])["precos"] for _, r in rk.iterrows()}, {}, R["macro"],
+                     data=str(HOJE.date()), usar_ia=False)
+    c = m["consenso"].set_index("ticker")
+    assert c.loc[rk.loc[0, "ticker"], "vetado"] and c.loc[rk.loc[0, "ticker"], "consenso"] == "Vetado"
+    assert len(m["opinioes"][rk.loc[2, "ticker"]]) == 7
+    assert any(v["verificador"].endswith("Fausto") and v["ticker"] == rk.loc[1, "ticker"] for v in m["verificacoes"])
+
+
+def test_memoria_aprende_com_o_placar(tmp_path, monkeypatch):
+    monkeypatch.setattr(memoria, "ARQ", tmp_path / "mem.csv")
+    dias = pd.bdate_range("2025-01-01", periods=200)
+    sobe = pd.Series(np.linspace(10, 14, 200), index=dias)
+    cai = pd.Series(np.linspace(10, 7, 200), index=dias)
+    precos = {"SOBE3": sobe, "CAI3": cai}
+    # agente "bom" votou certo, agente "ruim" votou errado, em 20 dias diferentes
+    for d in dias[:20]:
+        ops = {"SOBE3": {"bom": {"voto": 1}, "ruim": {"voto": -1}}, "CAI3": {"bom": {"voto": -1}, "ruim": {"voto": 1}}}
+        memoria.registrar(ops, {"SOBE3": float(sobe[d]), "CAI3": float(cai[d])}, d.date())
+    av = memoria.avaliar(precos, {})
+    pa = av["por_agente"].set_index("agente")
+    assert pa.loc["bom", "acerto"] == 1.0 and pa.loc["ruim", "acerto"] == 0.0
+    monkeypatch.setattr(memoria, "AMOSTRA_MINIMA", 10)
+    f = memoria.fatores(av)
+    assert f["bom"] == 1.5 and f["ruim"] == 0.5
+
+
+def test_previsor_sem_vantagem_fica_neutro():
+    rng = np.random.default_rng(1)
+    dias = pd.bdate_range("2018-01-01", "2026-10-15")
+    precos = {f"R{i}A3": pd.Series(20 * np.exp(np.cumsum(rng.normal(0, 0.02, len(dias)))), index=dias) for i in range(6)}
+    prev = previsor.prever_todas(precos)
+    val = previsor.validar_historico(precos)
+    cal, fator = previsor.calibrar(prev, val)
+    assert 0.40 < val["acerto"] < 0.60  # passeio aleatório: ninguém prevê
+    if fator == 0:
+        assert (cal["direcao"] == "Indefinida").all()

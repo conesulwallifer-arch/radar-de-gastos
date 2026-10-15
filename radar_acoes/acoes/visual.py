@@ -79,7 +79,31 @@ h2, h3 { font-size: 1.15rem !important; text-transform: uppercase; color: var(--
   background: linear-gradient(135deg, rgba(0,229,255,.09), rgba(8,26,44,.85)); box-shadow: 0 0 30px rgba(0,229,255,.08);
   font-size:1.03rem; line-height:1.6; }
 .jv-fala .jv-cab { font-family:'Orbitron',sans-serif; font-size:.8rem; letter-spacing:.2em; color:var(--ciano); margin-bottom:8px; }
-@media (prefers-reduced-motion: reduce) { .jv-topo::after, .jv-reator *, .jv-chip.on::before { animation: none !important; } }
+
+/* ---------- sala dos agentes ---------- */
+.ag-grade { display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:14px; margin:8px 0 16px; }
+.ag-card { position:relative; border:1px solid var(--borda); border-radius:16px; padding:16px; overflow:hidden;
+  background: linear-gradient(165deg, rgba(0,229,255,.09), rgba(8,26,44,.82)); box-shadow: 0 0 26px rgba(0,229,255,.07); }
+.ag-card::after { content:""; position:absolute; left:0; right:0; top:0; height:2px;
+  background: linear-gradient(90deg, transparent, var(--ciano), transparent); animation: varre 3.5s linear infinite; }
+.ag-topo { display:flex; align-items:center; gap:12px; }
+.ag-avatar { width:54px; height:54px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.7rem;
+  border:2px solid var(--ciano); box-shadow: 0 0 16px rgba(0,229,255,.55), inset 0 0 12px rgba(0,229,255,.35);
+  background: radial-gradient(circle, rgba(0,229,255,.25), rgba(3,11,22,.9)); animation: pulsa 3s ease-in-out infinite; }
+.ag-nome { font-family:'Orbitron',sans-serif; font-weight:700; font-size:1.05rem; color:#E8FCFF; letter-spacing:.06em; }
+.ag-cargo { font-family:'Rajdhani',sans-serif; font-size:.95rem; color:var(--apagado); }
+.ag-status { font-family:'Rajdhani',sans-serif; font-weight:700; font-size:.8rem; letter-spacing:.08em; color:var(--verde); margin-top:2px; }
+.ag-status::before { content:"●"; margin-right:5px; animation: pulsa 1.4s infinite; display:inline-block; }
+.ag-placar { display:flex; gap:10px; margin:12px 0 8px; font-family:'Rajdhani',sans-serif; font-weight:700; }
+.ag-placar span { padding:2px 8px; border-radius:8px; border:1px solid var(--borda); font-size:.9rem; }
+.ag-placar .a { color:var(--verde); } .ag-placar .c { color:var(--vermelho); } .ag-placar .v { color:var(--ambar); }
+.ag-linha { font-size:.92rem; line-height:1.45; margin-top:6px; color:var(--texto); }
+.ag-linha b { color:var(--ciano); font-family:'Rajdhani',sans-serif; letter-spacing:.04em; }
+.ag-console { font-family: 'Consolas','Courier New',monospace; font-size:.86rem; line-height:1.55; color:#9FF3FF;
+  background:#01060D; border:1px solid var(--borda); border-radius:12px; padding:12px 14px; max-height:340px; overflow:auto;
+  box-shadow: inset 0 0 22px rgba(0,229,255,.08); }
+.ag-console .h { color:#4F7A8C; margin-right:8px; }
+@media (prefers-reduced-motion: reduce) { .jv-topo::after, .jv-reator *, .jv-chip.on::before, .ag-card::after, .ag-avatar, .ag-status::before { animation: none !important; } }
 @media (max-width: 640px) { .jv-titulo { font-size:1.4rem; letter-spacing:.18em; } .jv-reator { flex-basis:60px; height:60px; } }
 </style>
 """
@@ -145,3 +169,24 @@ def fala(texto_md: str, cabecalho: str) -> None:
     """Caixa de fala do JARVIS."""
     st.markdown(f'<div class="jv-fala"><div class="jv-cab">{html.escape(cabecalho)}</div>{_md_simples(texto_md)}</div>',
                 unsafe_allow_html=True)
+
+
+def agentes(cards: list[dict]) -> None:
+    """cards: [{'icone','nome','cargo','status','a_favor','contra','vetos','favoritas','alerta'}]."""
+    blocos = []
+    for c in cards:
+        vet = f'<span class="v">⛔ {c["vetos"]} veto(s)</span>' if c.get("vetos") else ""
+        blocos.append(
+            f'<div class="ag-card"><div class="ag-topo"><div class="ag-avatar">{c["icone"]}</div><div>'
+            f'<div class="ag-nome">{html.escape(c["nome"])}</div><div class="ag-cargo">{html.escape(c["cargo"])}</div>'
+            f'<div class="ag-status">{html.escape(c["status"])}</div></div></div>'
+            f'<div class="ag-placar"><span class="a">▲ {c["a_favor"]} a favor</span><span class="c">▼ {c["contra"]} contra</span>{vet}</div>'
+            f'<div class="ag-linha"><b>FAVORITAS:</b> {html.escape(c["favoritas"] or "nenhuma hoje")}</div>'
+            + (f'<div class="ag-linha"><b>DE OLHO:</b> {html.escape(c["alerta"])}</div>' if c.get("alerta") else "")
+            + "</div>")
+    st.markdown(f'<div class="ag-grade">{"".join(blocos)}</div>', unsafe_allow_html=True)
+
+
+def console(linhas: list[str], hora: str = "") -> None:
+    corpo = "".join(f'<div><span class="h">{html.escape(hora)}</span>{html.escape(l)}</div>' for l in linhas)
+    st.markdown(f'<div class="ag-console">{corpo}</div>', unsafe_allow_html=True)

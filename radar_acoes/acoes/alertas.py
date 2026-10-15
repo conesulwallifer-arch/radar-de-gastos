@@ -51,6 +51,11 @@ def gerar(atual: pd.DataFrame, anterior: pd.DataFrame | None, noticias: dict[str
             add(1 if novo else 3, "Oportunidade", t,
                 f"{'NOVA ' if novo else ''}oportunidade: {t} ({r['nome']}) a {_fmt_r(r['preco'])}, abaixo do preço-teto "
                 f"{_fmt_r(r['preco_teto_bazin'])} (margem {_fmt_pct(r['margem_bazin'])}), DY médio 5a {_fmt_pct(r['dy_medio_5a'])}, nota {r['nota']:.0f}.")
+        # Mesa de analistas: novo consenso de compra forte
+        if r.get("consenso") == "Compra forte" and (a is None or a.get("consenso") != "Compra forte"):
+            placar = f"{r.get('placar', 0):+.2f}".replace(".", ",")
+            add(1, "Mesa", t, f"A mesa de analistas chegou a consenso de COMPRA FORTE em {t} "
+                              f"({int(r.get('a_favor', 0))} de 7 agentes a favor, placar {placar}).")
         # Entrou/saiu do top
         if a is not None and r["posicao"] <= top < a["posicao"]:
             add(2, "Ranking", t, f"{t} entrou no top {top} (era {int(a['posicao'])}º, agora {int(r['posicao'])}º).")

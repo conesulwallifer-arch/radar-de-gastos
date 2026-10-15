@@ -11,7 +11,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, aporte, jarvis, meta, plano, universo, visual  # noqa: E402
+from acoes import AVISO, aporte, jarvis, memoria, mesa, meta, plano, universo, visual  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
 
 st.set_page_config(page_title="J.A.R.V.I.S. · Radar de Ações", page_icon="🤖", layout="wide")
@@ -54,9 +54,11 @@ def carregar(_marca: float) -> dict | None:
 
 
 def rodar(demo: bool):
-    with st.spinner("Apurando: cotações, proventos, indicadores, notícias, juros do Banco Central e teste no passado "
-                    "(alguns minutos na 1ª vez do dia)..."):
-        apurar(universo.tickers(), plano.ler()["aporte_mensal"], usar_demo=demo, enviar=False)
+    """Roda a apuração mostrando, ao vivo, cada etapa e cada agente trabalhando."""
+    with st.status("🤖 JARVIS convocou a equipe. Acompanhe o trabalho ao vivo...", expanded=True) as caixa:
+        apurar(universo.tickers(), plano.ler()["aporte_mensal"], usar_demo=demo, enviar=False,
+               progresso=lambda m: caixa.write(md(m)))
+        caixa.update(label="✅ Apuração concluída — equipe dispensada.", state="complete")
     st.cache_data.clear()
     st.rerun()
 
@@ -70,11 +72,14 @@ with st.sidebar:
         pl["nome"] = nome.strip()
         plano.salvar(pl)
     if st.button("🔄 Apurar agora (dados reais)", width="stretch", type="primary"):
-        rodar(False)
+        st.session_state["rodar_demo"] = False
     if st.button("🧪 Testar com dados fictícios", width="stretch"):
-        rodar(True)
+        st.session_state["rodar_demo"] = True
     st.caption("O ideal é apurar todo dia útil depois das 18h (fechamento da B3). "
                "Agende o arquivo *Apurar Acoes.bat* no Windows ou use o GitHub Actions (veja o README).")
+
+if "rodar_demo" in st.session_state:  # roda na área principal, para ver a equipe trabalhando com espaço
+    rodar(st.session_state.pop("rodar_demo"))
 
 R = carregar(ULTIMO.stat().st_mtime if ULTIMO.exists() else 0)
 if R is None:
@@ -99,6 +104,7 @@ chips = [("ONLINE", "on"),
          (f"COTAÇÕES {ult_cot:%d/%m/%Y}" if ult_cot is not None else "SEM COTAÇÕES", "alerta" if atraso > 3 else ""),
          (f"SELIC {pct(mac['selic'], 2)}", "alerta" if mac.get("estimado") else ""),
          (f"{len(rk)} EMPRESAS", ""),
+         ("7 AGENTES ATIVOS" if R.get("mesa") else "AGENTES AGUARDANDO", "on" if R.get("mesa") else "alerta"),
          ("IA + PESQUISA WEB" if jarvis.ia_disponivel() else "MODO LOCAL (SEM IA)", "" if jarvis.ia_disponivel() else "alerta")]
 if R.get("demo"):
     chips.insert(1, ("DADOS FICTÍCIOS", "perigo"))
@@ -111,7 +117,7 @@ if R.get("demo"):
     st.error("⚠️ **MODO DEMONSTRAÇÃO — NÚMEROS FICTÍCIOS.** Nada aqui vale para investir. "
              "Clique em **🔄 Apurar agora (dados reais)** na barra lateral.")
 
-abas = st.tabs(["🤖 JARVIS", "✅ O que fazer hoje", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
+abas = st.tabs(["🤖 JARVIS", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
                 "🧪 O sistema funciona?", "🔔 Alertas", "❓ Como funciona e limites"])
 
 # carteira-alvo e números da meta, usados em várias abas
@@ -167,8 +173,131 @@ with abas[0]:
         st.session_state["chat"] = []
         st.rerun()
 
-# ======================================================================= HOJE
+# ======================================================================= SALA DOS AGENTES
 with abas[1]:
+    M = R.get("mesa")
+    if not M:
+        st.info("A equipe ainda não se reuniu nesta apuração. Clique em **🔄 Apurar agora**.")
+    else:
+        hora_m = pd.Timestamp(M.get("hora") or R["data"])
+        st.markdown(md(
+            "Sete especialistas analisam **todas** as ações, cada um pelo seu ângulo, e votam de −2 a +2. Depois, "
+            "**um confere o trabalho do outro** (verificação cruzada) e o JARVIS só recomenda compra quando a nota do sistema "
+            "**e** a equipe concordam (dupla checagem)." + (" Hoje os especialistas também foram revisados por IA." if M.get("ia") else "")))
+        ops_all = M["opinioes"]
+        nota_de = dict(zip(rk["ticker"], rk["nota"]))
+        top15 = rk.head(15)["ticker"].tolist()
+        cards = []
+        for ag in mesa.AGENTES:
+            votos = {t: ops_all[t][ag.id] for t in ops_all if ag.id in ops_all[t]}
+            fav = sorted([t for t, v in votos.items() if v["voto"] > 0], key=lambda t: (-votos[t]["voto"], -nota_de.get(t, 0)))[:3]
+            alvo = next((t for t in top15 if votos.get(t, {}).get("voto", 0) < 0 and votos[t]["argumentos"]), None)
+            cards.append({"icone": ag.icone, "nome": ag.apelido, "cargo": ag.nome,
+                          "status": f"CONCLUIU ÀS {hora_m:%H:%M}" + (" · REVISADO COM IA" if M.get("ia") and ag.id != "previsor" else ""),
+                          "a_favor": sum(v["voto"] > 0 for v in votos.values()), "contra": sum(v["voto"] < 0 for v in votos.values()),
+                          "vetos": sum(bool(v.get("veto")) for v in votos.values()), "favoritas": ", ".join(fav),
+                          "alerta": f"{alvo}: {votos[alvo]['argumentos'][0]}" if alvo else ""})
+        visual.agentes(cards)
+
+        st.subheader("🧠 Cérebro de cada agente — memória e aprendizado")
+        cer = M.get("cerebro") or {}
+        pa = cer.get("por_agente")
+        apr = M.get("aprendizado") or {}
+        if pa is None or len(pa) == 0:
+            st.info(md(f"Os agentes estão **memorizando**: {cer.get('votos_guardados', 0):,} votos guardados".replace(",", ".")
+                       + (f" desde {pd.Timestamp(cer['desde']):%d/%m/%Y}" if cer.get("desde") else "")
+                       + ". Cada voto é conferido 3 meses depois contra o que a ação fez de verdade (versus a média do mercado). "
+                         "Com amostra suficiente, quem acerta mais ganha mais peso nas decisões e quem erra perde."))
+        else:
+            mem = pa.copy()
+            mem["Agente"] = mem["agente"].map(lambda a: f"{mesa.POR_ID[a].icone} {mesa.POR_ID[a].apelido}" if a in mesa.POR_ID else a)
+            mem["Peso aprendido"] = mem["agente"].map(lambda a: f"×{apr.get(a, 1.0):.2f}".replace(".", ","))
+            st.dataframe(pd.DataFrame({
+                "Agente": mem["Agente"], "Votos conferidos": mem["conferidos"], "Acerto real": mem["acerto"].map(pct),
+                "Ações que apoiou (vs mercado)": mem["ganho_a_favor"].map(pct), "Ações que rejeitou (vs mercado)": mem["ganho_contra"].map(pct),
+                "Peso aprendido": mem["Peso aprendido"]}), hide_index=True, width="stretch")
+            st.caption(f"Peso só muda após {memoria.AMOSTRA_MINIMA} votos conferidos. "
+                       f"{cer.get('pendentes', 0):,} votos ainda aguardando completar 3 meses.".replace(",", "."))
+
+        st.subheader("📟 Atividade da equipe")
+        visual.console(M["log"], f"[{hora_m:%H:%M}] ")
+
+        st.subheader("🔍 Verificação cruzada — um confere o outro")
+        ver = pd.DataFrame(M.get("verificacoes") or [])
+        if ver.empty:
+            st.success("Nenhuma contestação hoje: os pareceres dos agentes são coerentes entre si.")
+        else:
+            visual.cartoes([("Contestações", str(len(ver)), "achados de um agente sobre outro"),
+                            ("Votos corrigidos", str(int((ver["efeito"] != "anotado").sum())), "antes de chegar ao consenso", "alerta"),
+                            ("Ações revisadas", str(ver["ticker"].nunique()), "com ao menos uma contestação")])
+            par = ver.groupby(["verificador", "verificado"]).size().reset_index(name="vezes")
+            st.dataframe(par.rename(columns={"verificador": "Quem conferiu", "verificado": "Trabalho conferido", "vezes": "Contestações"}),
+                         hide_index=True, width="stretch")
+            with st.expander("Ver cada contestação"):
+                st.dataframe(ver.rename(columns={"verificador": "Quem conferiu", "verificado": "Conferido", "ticker": "Ação",
+                                                 "achado": "O que encontrou", "efeito": "Efeito"}), hide_index=True, width="stretch")
+
+        st.subheader("🗳️ Placar da mesa")
+        pl_m = rk[["posicao", "ticker", "sinal", "consenso", "placar", "a_favor", "contra", "checagem"]].copy()
+        pl_m["votos"] = pl_m["ticker"].map(lambda t: mesa.votos_icones(ops_all[t]))
+        pl_m["sinal"] = pl_m["sinal"].map(lambda x: f"{COR_SINAL.get(x, '')} {x}")
+        st.dataframe(pl_m[["posicao", "ticker", "consenso", "placar", "votos", "a_favor", "contra", "sinal", "checagem"]],
+                     hide_index=True, width="stretch", height=420, column_config={
+                         "posicao": st.column_config.NumberColumn("#", width="small"), "ticker": "Ação", "consenso": "Consenso da mesa",
+                         "placar": st.column_config.NumberColumn("Placar (−2 a +2)", format="%+.2f"),
+                         "votos": st.column_config.TextColumn("Votos (💰🏛️🏷️📈📰🔮🛡️)", width="large"),
+                         "a_favor": "A favor", "contra": "Contra", "sinal": "Decisão final",
+                         "checagem": st.column_config.TextColumn("Dupla checagem")})
+        st.caption("🟢🟢 forte a favor · 🟢 a favor · ⚪ neutro · 🔴 contra · 🔴🔴 forte contra · ⛔ veto")
+
+        st.subheader("💬 Debate sobre uma ação")
+        t_deb = st.selectbox("Escolha a ação", rk["ticker"], key="debate",
+                             format_func=lambda x: f"{x} — {rk.set_index('ticker').at[x, 'consenso']}")
+        rotulo = {2: "forte a favor", 1: "a favor", 0: "neutro", -1: "contra", -2: "forte contra"}
+        for ag in mesa.AGENTES:
+            o = ops_all[t_deb].get(ag.id)
+            if not o:
+                continue
+            with st.chat_message(ag.apelido, avatar=ag.icone):
+                st.markdown(md(f"**{ag.apelido}** · {ag.nome} — **{'VETO' if o.get('veto') else rotulo[o['voto']]}**\n\n"
+                               + "\n".join(f"- {a}" for a in o["argumentos"])))
+        rr = rk.set_index("ticker").loc[t_deb]
+        with st.chat_message("JARVIS", avatar="🤖"):
+            st.markdown(md(f"**JARVIS** — consenso: **{rr['consenso']}** (placar {rr['placar']:+.2f}). "
+                           f"Decisão final: **{rr['sinal']}**" + (f" — {rr['checagem']}." if rr.get("checagem") not in (None, "ok") else ".")))
+
+        st.subheader("🔮 Íris — quem pode subir ou cair no próximo mês")
+        PV = R.get("previsor") or {}
+        val = PV.get("validacao") or {}
+        real = PV.get("placar_real") or {}
+        visual.cartoes([
+            ("Acerto no teste de 3 anos", pct(val.get("acerto")), f"{val.get('n', 0)} previsões testadas sem olhar o futuro"),
+            ("Acerto de quem chuta 'sobe'", pct(val.get("chute_alta")), "a régua para comparar"),
+            ("Placar real (previsões registradas)", pct(real.get("acerto")) if real.get("n_direcionais") else "aguardando",
+             f"{real.get('n', 0)} conferidas · {real.get('pendentes', 0)} esperando completar 1 mês"),
+            ("Vantagem comprovada?", "SIM" if PV.get("fator", 0) > 0 else "NÃO",
+             "previsões valendo" if PV.get("fator", 0) > 0 else "previsões neutralizadas", "ok" if PV.get("fator", 0) > 0 else "alerta"),
+        ])
+        if "prob_alta_1m" in rk:
+            col = "prob_alta_1m" if PV.get("fator", 0) > 0 else "prob_alta_1m_bruta"
+            if PV.get("fator", 0) <= 0:
+                st.warning("A Íris **não bateu o chute** no teste histórico. As probabilidades abaixo são **brutas, só para estudo**, "
+                           "e não influenciam nenhuma recomendação.")
+            ok_ = rk.dropna(subset=[col])
+            c1, c2 = st.columns(2)
+            for colz, titulo, dados_ in ((c1, "📈 Maior chance de ALTA", ok_.nlargest(8, col)), (c2, "📉 Maior chance de QUEDA", ok_.nsmallest(8, col))):
+                colz.markdown(f"**{titulo}**")
+                colz.dataframe(pd.DataFrame({"Ação": dados_["ticker"], "Chance de alta": dados_[col],
+                                             "Variação típica": dados_["ret_mediano_1m"].map(lambda x: pct(x)),
+                                             "Faixa (10%–90%)": [f"{pct(a)} a {pct(b)}" for a, b in zip(dados_["ret_p10_1m"], dados_["ret_p90_1m"])]}),
+                               hide_index=True, width="stretch",
+                               column_config={"Chance de alta": st.column_config.ProgressColumn(min_value=0.0, max_value=1.0, format="percent")})
+            st.caption("Como a Íris prevê: procura no passado da própria ação os dias mais parecidos com hoje (tendência de 6 meses, "
+                       "distância da média de 200 dias, último mês) e conta quantas vezes subiu no mês seguinte. "
+                       "Cada previsão diária é registrada e conferida 1 mês depois — o placar real aparece acima.")
+
+# ======================================================================= HOJE
+with abas[2]:
     st.subheader(f"Este mês, com {brl(pl['aporte_mensal'])} de aporte, compre:")
     compras, sobra = aporte.sugerir(rk, pl["aporte_mensal"], cart)
     if compras.empty:
@@ -223,7 +352,7 @@ with abas[1]:
         st.caption(f"+ {len(imp) - 8} alertas na aba 🔔 Alertas.")
 
 # ======================================================================= META
-with abas[2]:
+with abas[3]:
     st.subheader("🎯 Quanto tempo até a sua meta — e o que te leva mais rápido")
     st.caption("O sistema simula 5.000 futuros possíveis para a bolsa (anos bons e ruins, na proporção do passado) "
                "e mostra a CHANCE de você chegar até cada ano. Ninguém consegue prometer uma data exata.")
@@ -305,7 +434,7 @@ with abas[2]:
                  hide_index=True, width="stretch")
 
 # ======================================================================= RANKING
-with abas[3]:
+with abas[4]:
     st.caption("Todas as ações acompanhadas, da melhor para a pior para quem quer **renda + patrimônio no longo prazo**. "
                "Passe o mouse no título de cada coluna para ver o que significa.")
     f1, f2, f3 = st.columns([2, 2, 1])
@@ -324,12 +453,12 @@ with abas[3]:
         v[c] = (v[c] * 100).round(1)
     for c in ["preco", "preco_teto_bazin", "preco_justo_graham", "proventos_previstos_12m"]:
         v[c] = v[c].round(2)
-    cols = ["posicao", "ticker", "nome", "sinal", "nota", "confianca", "preco", "preco_teto_bazin", "margem_bazin",
+    cols = ["posicao", "ticker", "nome", "sinal", "consenso", "nota", "confianca", "preco", "preco_teto_bazin", "margem_bazin",
             "dy_medio_5a", "dy_previsto", "proventos_previstos_12m", "retorno_total_esperado_aa", "anos_pagou_10",
             "cresc_proventos_5a", "roe", "pl", "pvp", "var_12m", "meses_provaveis", "setor", "conferir"]
     st.dataframe(v[[c for c in cols if c in v]], hide_index=True, width="stretch", height=600, column_config={
         "posicao": st.column_config.NumberColumn("#", width="small"),
-        "ticker": "Ação", "nome": "Empresa", "sinal": "Sinal", "setor": "Setor",
+        "ticker": "Ação", "nome": "Empresa", "sinal": "Sinal", "setor": "Setor", "consenso": "Mesa de agentes",
         "nota": st.column_config.ProgressColumn("Nota (0–100)", min_value=0, max_value=100, format="%.0f"),
         "confianca": st.column_config.TextColumn("Dados", help="Alta = dados conferidos e coerentes. Média/Baixa = veja os avisos na aba Empresa."),
         "preco": col_rs("Preço hoje"),
@@ -354,7 +483,7 @@ with abas[3]:
         st.caption(f"Sem dados nesta apuração (código pode ter mudado na B3): {', '.join(R['sem_dados'])}")
 
 # ======================================================================= EMPRESA
-with abas[4]:
+with abas[5]:
     nomes = rk.set_index("ticker")["nome"]
     t = st.selectbox("Escolha a empresa", rk["ticker"], format_func=lambda x: f"{x} — {nomes[x]}")
     r = rk.set_index("ticker").loc[t]
@@ -363,6 +492,9 @@ with abas[4]:
     prov: pd.Series = R["proventos"][t]
     st.subheader(f"{COR_SINAL.get(r['sinal'], '')} {t} — {r['nome']}")
     st.markdown(md(f"**Veredito: {r['sinal'].upper()}** (nota {r['nota']:.0f}/100, {int(r['posicao'])}º de {len(rk)}). {r['por_que']}"))
+    if R.get("mesa") and t in R["mesa"]["opinioes"]:
+        st.markdown(md(f"🧠 **Mesa de agentes: {r.get('consenso', '—')}** · {mesa.votos_icones(R['mesa']['opinioes'][t])} "
+                       "— veja o debate completo na aba 🧠 Sala dos Agentes."))
     links = [f"[Status Invest ↗]({r['conferir']})"] + ([f"[Site da empresa ↗]({info['website']})"] if info.get("website") else [])
     st.caption(f"{r['setor']} · cotação de {pd.Timestamp(r['data_cotacao']):%d/%m/%Y} · " + " · ".join(links))
     if r.get("avisos_dados"):
@@ -450,7 +582,7 @@ with abas[4]:
                      hide_index=True, width="stretch")
 
 # ======================================================================= CARTEIRA
-with abas[5]:
+with abas[6]:
     st.markdown("**Minha carteira** — digite as ações que você já tem e clique em Salvar. "
                 "O aporte do mês passa a completar o que está abaixo do alvo, e os alertas acompanham as suas ações.")
     base_cart = cart if not cart.empty else pd.DataFrame({"ticker": pd.Series(dtype=str), "quantidade": pd.Series(dtype=float),
@@ -480,7 +612,7 @@ with abas[5]:
         st.caption("'Evitar' numa ação que você já tem não é ordem de venda: é um sinal para olhar as notícias e os resultados.")
 
 # ======================================================================= BACKTEST
-with abas[6]:
+with abas[7]:
     bt = R.get("backtest")
     st.subheader("🧪 E se você tivesse seguido o sistema nos últimos 5 anos?")
     if not bt:
@@ -514,7 +646,7 @@ with abas[6]:
             st.dataframe(bt["compras"].iloc[::-1], hide_index=True, width="stretch")
 
 # ======================================================================= ALERTAS
-with abas[7]:
+with abas[8]:
     if not R["alertas"]:
         st.success("Nenhum alerta hoje.")
     icones = {"Oportunidade": "🟢", "Queda forte": "📉", "Provento": "💰", "Data-com": "📅", "Ranking": "🏆",
@@ -526,7 +658,7 @@ with abas[7]:
             (st.warning if a["nivel"] == 1 else st.info)(md(f"{icones.get(a['tipo'], '•')} **{a['tipo']}** — {a['texto']}"))
 
 # ======================================================================= COMO FUNCIONA
-with abas[8]:
+with abas[9]:
     st.markdown("""
 ### De onde vêm os dados (todos reais e atualizados a cada apuração)
 - **Cotações, proventos (dividendos + JCP) e balanço**: Yahoo Finance. A data da última cotação aparece no topo.

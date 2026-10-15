@@ -31,6 +31,35 @@ O painel tem a cara de um HUD do JARVIS (tema escuro, ciano, reator animado) e u
   Cadastre os segredos `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` e, se quiser IA, `ANTHROPIC_API_KEY`; opcionalmente `CARTEIRA_CSV` e
   `PLANO_JSON` (o conteúdo do seu `dados_acoes/plano.json`).
 
+## 🧠 A equipe de agentes
+
+Sete especialistas analisam **todas** as ações todo dia, cada um pelo seu ângulo, e votam de −2 a +2:
+
+| Agente | Função |
+|---|---|
+| 💰 **Dora** — Dividendos | quanto paga, regularidade, crescimento e sustentabilidade dos proventos |
+| 🏛️ **Fausto** — Fundamentos | lucro, ROE, margens, dívida |
+| 🏷️ **Vitória** — Valuation | preço-teto (Bazin), preço justo (Graham), P/L, P/VP |
+| 📈 **Téo** — Tendência | média de 200 dias, quedas em andamento, distância do topo |
+| 📰 **Nina** — Notícias | tom do noticiário e notícias graves (com IA: pesquisa na internet) |
+| 🔮 **Íris** — Previsões | chance de subir/cair no próximo mês, com placar de acertos |
+| 🛡️ **Rex** — Risco | veta prejuízo e dado duvidoso, mede oscilação, concentração e compara com a renda fixa |
+
+**Como eles se interligam para não errar:**
+1. **Verificação cruzada** — um confere o outro: Fausto confere a Dora (o lucro sustenta os proventos?), Dora confere a Vitória
+   (o preço-teto está inflado por provento extraordinário?), Téo confere a Vitória (está barata porque ainda está caindo?),
+   Vitória confere o Téo, Nina confere o Fausto (notícia grave?), Rex confere a base de todos (cotação atrasada = veto).
+2. **Dupla checagem** — o JARVIS só mantém "Comprar/Acumular" se a nota do sistema **e** o consenso da equipe concordarem.
+3. **Cérebro (memória e aprendizado)** — cada voto é guardado e conferido 3 meses depois contra o que a ação fez de verdade
+   (descontando o movimento da bolsa). Com amostra suficiente, quem acerta mais ganha peso e quem erra perde.
+4. **Íris se autoavalia** — as previsões de curto prazo são testadas nos últimos 3 anos sem olhar o futuro; se não baterem o
+   "chute", são neutralizadas e não influenciam nada. Toda previsão diária é registrada e conferida 1 mês depois.
+
+Com `ANTHROPIC_API_KEY`, cada especialista também é um agente Claude que revisa as 8 melhores candidatas (com seu próprio
+histórico de acertos no "cérebro"), e a Nina pesquisa a internet. Na aba **🧠 Sala dos Agentes** você vê cada um trabalhando,
+a atividade, as contestações, o placar, o debate sobre cada ação e o cérebro de cada agente. Ao clicar em **Apurar agora**,
+as etapas aparecem ao vivo.
+
 ## Como instalar (Windows, Mac ou Linux, Python 3.10+)
 
 ```bash
@@ -151,6 +180,10 @@ acoes/plano.py       seu plano (aporte, meta) salvo em dados_acoes/plano.json
 acoes/jarvis.py      relatório do dia e conversa (regras ou IA Claude com pesquisa na web)
 acoes/vigia.py       vigilância de preços durante o pregão
 acoes/visual.py      visual HUD do painel
+acoes/mesa.py        os 7 agentes, verificação cruzada e consenso (regras + IA)
+acoes/previsor.py    Íris: chance de alta/queda em 1 mês, teste sem colar e placar real
+acoes/memoria.py     cérebro dos agentes: memória de votos e pesos aprendidos
+acoes/ia.py          acesso à IA Claude (opcional)
 acoes/alertas.py     alertas do dia, Telegram e e-mail
 acoes/noticias.py    Google Notícias + tom e assunto
 acoes/demo.py        dados fictícios para testar sem internet

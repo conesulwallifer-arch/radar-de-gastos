@@ -11,15 +11,13 @@ número e nunca prometer retorno.
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime
 
 import pandas as pd
 
-from . import aporte, meta, plano as plano_mod
+from . import aporte, ia, mesa as mesa_mod, meta, plano as plano_mod
 
-MODELO = os.getenv("JARVIS_MODELO", "claude-opus-5-5")
 
 
 # ------------------------------------------------------------------ formatação
@@ -67,6 +65,7 @@ def contexto(R: dict, pl: dict | None = None, cart: pd.DataFrame | None = None) 
             "retorno_total_esperado": round(float(r.get("retorno_total_esperado_aa") or 0), 3),
             "anos_pagando_de_10": int(r["anos_pagou_10"]), "roe": round(float(r["roe"]), 3) if r["roe"] == r["roe"] else None,
             "meses_que_paga": r.get("meses_provaveis"), "por_que": r.get("por_que"), "avisos": r.get("avisos_dados") or None,
+            "consenso_mesa": r.get("consenso"), "chance_alta_1m": r.get("prob_alta_1m"),
         }.items()}
 
     imp = [a for a in R.get("alertas", []) if a["nivel"] == 1]
@@ -90,9 +89,39 @@ def contexto(R: dict, pl: dict | None = None, cart: pd.DataFrame | None = None) 
         "alertas_importantes": [f"[{a['tipo']}] {a['texto']}" for a in imp[:12]],
         "dados_duvidosos": rk.loc[rk.get("confianca", pd.Series(dtype=str)) == "Baixa", "ticker"].tolist() if "confianca" in rk else [],
         "teste_no_passado": {k: bt.get(k) for k in ("meses", "investido", "sistema", "tir_sistema", "cdi", "tir_cdi", "ibovespa", "tir_ibovespa")} if bt else None,
+        "mesa_de_analistas": ({"resumo": mesa_mod.resumo_texto(R["mesa"]), "atividade": R["mesa"]["log"]} if R.get("mesa") else None),
+        "previsora_iris": _iris(R),
         "noticias_recentes": {t: [f"{n['titulo']} ({n['fonte']}, tom {n['tom']})" for n in v[:4]]
                               for t, v in (R.get("noticias") or {}).items() if t in {x["ticker"] for _, x in rk.head(10).iterrows()}},
     }
+
+
+def _iris(R: dict) -> dict | None:
+    pv = R.get("previsor")
+    rk = R["ranking"]
+    if not pv or "prob_alta_1m" not in rk:
+        return None
+    v = pv["validacao"]
+    ok = rk.dropna(subset=["prob_alta_1m"])
+    return {"acerto_historico": v.get("acerto"), "acerto_do_chute": v.get("chute_alta"), "previsoes_testadas": v.get("n"),
+            "vantagem_comprovada": pv["fator"] > 0, "placar_real": pv.get("placar_real"),
+            "maior_chance_alta": [(r["ticker"], round(float(r["prob_alta_1m"]), 2)) for _, r in ok.nlargest(5, "prob_alta_1m").iterrows()],
+            "maior_chance_queda": [(r["ticker"], round(float(r["prob_alta_1m"]), 2)) for _, r in ok.nsmallest(5, "prob_alta_1m").iterrows()]}
+
+
+def texto_iris(c: dict) -> str:
+    i = c.get("previsora_iris")
+    if not i:
+        return "A Íris ainda não tem previsões de curto prazo nesta apuração."
+    teste = (f"No teste com os últimos 3 anos ({i['previsoes_testadas']} previsões), acertei {_p(i['acerto_historico'])} "
+             f"das direções — quem chutasse 'sempre sobe' acertaria {_p(i['acerto_do_chute'])}.")
+    if not i["vantagem_comprovada"]:
+        return ("🔮 Íris: " + teste + " Como não mostrei vantagem sobre o chute, neutralizei minhas previsões de curto prazo: "
+                "elas não influenciam as compras. O curto prazo da bolsa é quase aleatório; o longo prazo é que paga.")
+    alta = ", ".join(f"{t} ({_p(p, 0)})" for t, p in i["maior_chance_alta"][:3])
+    queda = ", ".join(f"{t} ({_p(p, 0)})" for t, p in i["maior_chance_queda"][:3])
+    return (f"🔮 Íris: maior chance de ALTA no próximo mês: {alta}. Maior chance de QUEDA: {queda}. " + teste
+            + " São probabilidades, não certezas.")
 
 
 # ------------------------------------------------------------------ voz por regras (sem IA)
@@ -125,6 +154,10 @@ def relatorio_regras(c: dict) -> list[str]:
               else "as ações tendem a ganhar no longo prazo, com mais oscilação."))
     linhas.append(f"🏦 Cenário: Selic {_p(mac['selic'], 2)}, inflação {_p(mac['ipca_12m'])}. Para comparação, {cmp}"
                   + (" (taxas estimadas: Banco Central fora do ar)" if mac["estimado"] else ""))
+    if c.get("mesa_de_analistas"):
+        linhas.append(f"🧠 Mesa de analistas (Dora, Fausto, Vitória, Téo, Nina, Íris e Rex): {c['mesa_de_analistas']['resumo']}.")
+    if c.get("previsora_iris"):
+        linhas.append(texto_iris(c))
     if c["alertas_importantes"]:
         linhas.append(f"🔔 {len(c['alertas_importantes'])} alerta(s) importante(s). Principal: {c['alertas_importantes'][0]}")
     if c["dados_duvidosos"]:
@@ -157,10 +190,24 @@ def responder_regras(pergunta: str, c: dict, R: dict) -> str:
                f"Preço {_r(r['preco'])}, preço-teto {_r(r['preco_teto_bazin'])}. {r['por_que']} "
                f"Previsão de proventos nos próximos 12 meses: {_r(r.get('proventos_previstos_12m'))} por ação ({_p(r.get('dy_previsto'))}). "
                f"Confiança dos dados: {r.get('confianca', '—')}.")
+        if R.get("mesa") and t in R["mesa"]["opinioes"]:
+            ops = R["mesa"]["opinioes"][t]
+            txt += f"\n\nMesa de analistas: **{r.get('consenso', '—')}**. " + " ".join(
+                f"{mesa_mod.POR_ID[a].icone} {mesa_mod.POR_ID[a].apelido}: {o['argumentos'][0] if o['argumentos'] else 'sem comentário'}"
+                for a, o in ops.items())
+        if r.get("prob_alta_1m") == r.get("prob_alta_1m") and r.get("prob_alta_1m") is not None:
+            txt += f" Chance de alta no próximo mês (Íris): {_p(r['prob_alta_1m'], 0)}."
         news = (R.get("noticias") or {}).get(t, [])
         if news:
             txt += f" Última notícia: “{news[0]['titulo']}” ({news[0]['fonte']})."
         return txt
+    if any(k in q for k in ("cair", "subir", "queda", "alta", "previs", "próximo mês", "proximo mes", "curto prazo")):
+        return texto_iris(c)
+    if any(k in q for k in ("agente", "mesa", "equipe", "time", "analistas")):
+        m = c.get("mesa_de_analistas")
+        if not m:
+            return "A mesa de analistas ainda não se reuniu nesta apuração. Clique em Apurar agora."
+        return "Minha equipe hoje: " + m["resumo"] + ".\n\n" + "\n".join("- " + x for x in m["atividade"])
     if any(k in q for k in ("meta", "milh", "quando", "tempo", "chegar", "aposent", "rápido", "rapido")):
         p, pr = c["plano"], c["projecao"]
         return (f"Com {_r(p['patrimonio_hoje'], 0)} hoje e {_r(p['aporte_mensal'], 0)} por mês, o mais provável é chegar a {_r(p['meta'], 0)} em "
@@ -191,7 +238,8 @@ def responder_regras(pergunta: str, c: dict, R: dict) -> str:
     if any(k in q for k in ("melhor", "top", "ranking", "recomend")):
         return "Top 5 agora: " + "; ".join(f"{x['posicao']}. **{x['ticker']}** ({x['sinal']}, nota {x['nota']:.0f})" for x in c["top10"][:5]) + "."
     return ("Posso te responder sobre: uma ação específica (ex.: *TAEE11 vale a pena?*), *o que comprar este mês*, "
-            "*quando chego no milhão*, *melhores pagadoras de dividendos*, *Selic e renda fixa* e *riscos*. "
+            "*quando chego no milhão*, *melhores pagadoras de dividendos*, *quais podem subir ou cair*, *o que a equipe decidiu*, "
+            "*Selic e renda fixa* e *riscos*. "
             "Para conversa livre e pesquisa na internet, configure a chave da IA (ANTHROPIC_API_KEY) — veja o README.")
 
 
@@ -221,50 +269,15 @@ Termine com uma frase curta de recomendação para hoje."""
 
 
 def ia_disponivel() -> bool:
-    if os.getenv("JARVIS_SEM_IA"):
-        return False
-    try:
-        import anthropic  # noqa: F401
-    except ImportError:
-        return False
-    return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"))
+    return ia.disponivel()
 
 
 def _chamar(mensagens: list[dict], c: dict, pesquisar: bool, max_buscas: int = 5) -> str | None:
     """Chama o Claude com o contexto do dia (em cache) e, se pedido, a ferramenta de pesquisa web."""
-    import anthropic
-
-    client = anthropic.Anthropic()
     sistema = [{"type": "text", "text": SISTEMA},
                {"type": "text", "text": "CONTEXTO (apuração do Radar de Ações):\n" + json.dumps(c, ensure_ascii=False, sort_keys=True, default=str),
                 "cache_control": {"type": "ephemeral"}}]
-    ferramentas = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max_buscas,
-                    "user_location": {"type": "approximate", "country": "BR", "timezone": "America/Sao_Paulo"}}] if pesquisar else []
-    msgs = list(mensagens)
-    try:
-        for _ in range(4):  # a pesquisa web pode pausar o turno (pause_turn); continuamos até terminar
-            resp = client.beta.messages.create(
-                model=MODELO, max_tokens=16000, system=sistema, messages=msgs,
-                output_config={"effort": "medium"},
-                betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-                **({"tools": ferramentas} if ferramentas else {}),
-            )
-            if resp.stop_reason == "pause_turn":
-                msgs.append({"role": "assistant", "content": resp.content})
-                continue
-            if resp.stop_reason == "refusal":
-                return None
-            texto = "".join(b.text for b in resp.content if b.type == "text").strip()
-            return texto or None
-    except anthropic.AuthenticationError:
-        print("  [JARVIS] chave da IA inválida — usando o modo por regras.")
-    except anthropic.RateLimitError:
-        print("  [JARVIS] limite da IA atingido — usando o modo por regras.")
-    except anthropic.APIStatusError as e:
-        print(f"  [JARVIS] erro da IA ({e.status_code}) — usando o modo por regras.")
-    except anthropic.APIConnectionError:
-        print("  [JARVIS] sem conexão com a IA — usando o modo por regras.")
-    return None
+    return ia.chamar(sistema, mensagens, [ia.pesquisa_web(max_buscas)] if pesquisar else None)
 
 
 def relatorio(R: dict, pl: dict | None = None, usar_ia: bool = True) -> dict:
