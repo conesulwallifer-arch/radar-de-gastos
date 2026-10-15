@@ -29,6 +29,12 @@ SETOR_DE = {t: s for s, ts in SETORES.items() for t in ts}
 
 
 def tickers() -> list[str]:
+    """Lista padrão (ou a sua) + as ações que o Atlas propôs vigiar."""
+    from .atlas import ler_descobertas
+    return list(dict.fromkeys(_lista_base() + ler_descobertas()))
+
+
+def _lista_base() -> list[str]:
     arq = DADOS / "minha_lista.txt"
     if arq.exists():
         lista = [l.strip().upper() for l in arq.read_text(encoding="utf-8").splitlines()]

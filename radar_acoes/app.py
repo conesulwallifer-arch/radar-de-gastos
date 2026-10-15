@@ -11,7 +11,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, aporte, jarvis, memoria, mesa, meta, plano, universo, visual  # noqa: E402
+from acoes import AVISO, agenda, aporte, atlas, jarvis, memoria, mesa, meta, plano, universo, visual  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
 
 st.set_page_config(page_title="J.A.R.V.I.S. · Radar de Ações", page_icon="🤖", layout="wide")
@@ -117,7 +117,7 @@ if R.get("demo"):
     st.error("⚠️ **MODO DEMONSTRAÇÃO — NÚMEROS FICTÍCIOS.** Nada aqui vale para investir. "
              "Clique em **🔄 Apurar agora (dados reais)** na barra lateral.")
 
-abas = st.tabs(["🤖 JARVIS", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
+abas = st.tabs(["🤖 JARVIS", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
                 "🧪 O sistema funciona?", "🔔 Alertas", "❓ Como funciona e limites"])
 
 # carteira-alvo e números da meta, usados em várias abas
@@ -218,6 +218,29 @@ with abas[1]:
                 "Peso aprendido": mem["Peso aprendido"]}), hide_index=True, width="stretch")
             st.caption(f"Peso só muda após {memoria.AMOSTRA_MINIMA} votos conferidos. "
                        f"{cer.get('pendentes', 0):,} votos ainda aguardando completar 3 meses.".replace(",", "."))
+
+        A = R.get("atlas")
+        if A:
+            st.subheader("🧭 Atlas — o explorador com livre-arbítrio")
+            st.caption("Atlas decide sozinho o que investigar, com ferramentas: consulta o ranking, abre fichas, compara, pesquisa a internet "
+                       "(com IA), guarda anotações na memória de longo prazo, propõe novas ações para a equipe vigiar e levanta alertas. "
+                       "Ele não compra, não vende e não mexe no seu plano.")
+            visual.fala(A["relatorio"], f"ATLAS · {pd.Timestamp(A['hora']):%d/%m %H:%M} · "
+                        + ("MODO AUTÔNOMO (IA)" if A["modo"] == "IA" else "MODO LOCAL (REGRAS)"))
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**O que ele fez hoje**")
+                visual.console(A["diario"], "🧭 ")
+            with c2:
+                st.markdown("**Memória de longo prazo**")
+                notas_ = atlas.ler_notas(15)
+                if notas_:
+                    st.dataframe(pd.DataFrame(notas_)[::-1].rename(columns={"data": "Data", "ticker": "Ação", "texto": "Anotação"}),
+                                 hide_index=True, width="stretch", height=230)
+                else:
+                    st.caption("Vazia por enquanto (as anotações nascem no modo autônomo com IA).")
+                desc = atlas.ler_descobertas()
+                st.markdown("**Ações que ele colocou no radar:** " + (", ".join(desc) if desc else "nenhuma ainda"))
 
         st.subheader("📟 Atividade da equipe")
         visual.console(M["log"], f"[{hora_m:%H:%M}] ")
@@ -351,8 +374,45 @@ with abas[2]:
     if len(imp) > 8:
         st.caption(f"+ {len(imp) - 8} alertas na aba 🔔 Alertas.")
 
-# ======================================================================= META
+# ======================================================================= AGENDA
 with abas[3]:
+    st.subheader("📅 Quanto você deve receber nos próximos 12 meses")
+    compras_ag, _ = aporte.sugerir(rk, pl["aporte_mensal"], cart)
+    atual = dict(zip(cart["ticker"], cart["quantidade"])) if len(cart) else {}
+    com_plano = dict(atual)
+    for _, r_ in compras_ag.iterrows():
+        com_plano[r_["ticker"]] = com_plano.get(r_["ticker"], 0) + r_["comprar_qtd"]
+    proj_atual = agenda.projetar(atual, R["proventos"], rk, R["data"])
+    proj_plano = agenda.projetar(com_plano, R["proventos"], rk, R["data"])
+    if proj_plano.empty:
+        st.info("Cadastre sua carteira na aba 💼 Minha carteira para ver a agenda (ou ajuste o aporte para incluir as compras do mês).")
+    else:
+        renda_atual = float(proj_atual["valor"].sum()) if len(proj_atual) else 0.0
+        visual.cartoes([
+            ("Carteira atual: renda em 12 meses", brl(renda_atual), "estimativa pelo histórico"),
+            ("Com as compras deste mês", brl(proj_plano["valor"].sum()), f"+{brl(proj_plano['valor'].sum() - renda_atual)}", "ok"),
+            ("Média por mês", brl(proj_plano["valor"].sum() / 12), "com as compras do mês"),
+        ])
+        ordem = proj_plano.groupby(["ordem", "mes"])["valor"].sum().reset_index().sort_values("ordem")
+        st.altair_chart(alt.Chart(proj_plano).mark_bar().encode(
+            x=alt.X("mes:N", sort=ordem["mes"].tolist(), title=None), y=alt.Y("sum(valor):Q", title="R$ no mês"),
+            color=alt.Color("ticker:N", title="Ação"), tooltip=["mes", "ticker", alt.Tooltip("valor:Q", format=",.2f")]), width="stretch")
+        st.caption("Barras: proventos esperados por mês (carteira atual + compras sugeridas deste mês), pelo padrão dos últimos 3 anos "
+                   "de cada empresa e pela previsão de proventos. Datas e valores podem mudar: a empresa anuncia antes de pagar.")
+    st.subheader("🗓️ Próximas datas-com (para receber, compre até o pregão anterior)")
+    dc = agenda.proximas_datas_com(rk, 45, R["data"])
+    if dc.empty:
+        st.caption("Nenhuma data-ex informada para os próximos 45 dias.")
+    else:
+        st.dataframe(pd.DataFrame({"Ação": dc["ticker"], "Sinal": dc["sinal"].map(lambda x: f"{COR_SINAL.get(x, '')} {x}"),
+                                   "Data-ex": dc["data_ex"].dt.strftime("%d/%m/%Y"), "Compre até": dc["comprar_ate"].dt.strftime("%d/%m/%Y"),
+                                   "Último provento (R$/ação)": dc["ultimo_provento_valor"].map(brl),
+                                   "Rende por ano (média 5a)": dc["dy_medio_5a"].map(pct)}), hide_index=True, width="stretch")
+        st.caption("Comprar só para pegar um provento não costuma valer a pena (o preço cai no valor do provento na data-ex). "
+                   "Use isto para encaixar compras que você já ia fazer.")
+
+# ======================================================================= META
+with abas[4]:
     st.subheader("🎯 Quanto tempo até a sua meta — e o que te leva mais rápido")
     st.caption("O sistema simula 5.000 futuros possíveis para a bolsa (anos bons e ruins, na proporção do passado) "
                "e mostra a CHANCE de você chegar até cada ano. Ninguém consegue prometer uma data exata.")
@@ -434,7 +494,7 @@ with abas[3]:
                  hide_index=True, width="stretch")
 
 # ======================================================================= RANKING
-with abas[4]:
+with abas[5]:
     st.caption("Todas as ações acompanhadas, da melhor para a pior para quem quer **renda + patrimônio no longo prazo**. "
                "Passe o mouse no título de cada coluna para ver o que significa.")
     f1, f2, f3 = st.columns([2, 2, 1])
@@ -454,6 +514,7 @@ with abas[4]:
     for c in ["preco", "preco_teto_bazin", "preco_justo_graham", "proventos_previstos_12m"]:
         v[c] = v[c].round(2)
     cols = ["posicao", "ticker", "nome", "sinal", "consenso", "nota", "confianca", "preco", "preco_teto_bazin", "margem_bazin",
+            "grau_Valor", "grau_Renda", "grau_Qualidade", "grau_Saúde", "grau_Momento", "seguranca_div", "f_score_9",
             "dy_medio_5a", "dy_previsto", "proventos_previstos_12m", "retorno_total_esperado_aa", "anos_pagou_10",
             "cresc_proventos_5a", "roe", "pl", "pvp", "var_12m", "meses_provaveis", "setor", "conferir"]
     st.dataframe(v[[c for c in cols if c in v]], hide_index=True, width="stretch", height=600, column_config={
@@ -475,6 +536,10 @@ with abas[4]:
         "pvp": st.column_config.NumberColumn("P/VP", format="%.2f", help="Preço ÷ patrimônio por ação."),
         "var_12m": col_pct("Variação 12m"),
         "meses_provaveis": "Meses em que costuma pagar",
+        "grau_Valor": st.column_config.TextColumn("Valor", help="Nota de F a A+ comparando com as empresas do mesmo setor."),
+        "grau_Renda": "Renda", "grau_Qualidade": "Qualidade", "grau_Saúde": "Saúde", "grau_Momento": "Momento",
+        "seguranca_div": st.column_config.NumberColumn("Segurança dos dividendos", format="%.0f", help="Checagens aprovadas (0–100)."),
+        "f_score_9": st.column_config.NumberColumn("Piotroski (0–9)", format="%.0f", help="Força do balanço em 9 testes."),
         "conferir": st.column_config.LinkColumn("Conferir", display_text="Status Invest ↗"),
     })
     st.caption("🟢 **Comprar**: nota ≥ 65, preço abaixo do teto e dados confiáveis · 🟡 **Acumular**: nota ≥ 55 e até 10% acima do teto · "
@@ -483,7 +548,7 @@ with abas[4]:
         st.caption(f"Sem dados nesta apuração (código pode ter mudado na B3): {', '.join(R['sem_dados'])}")
 
 # ======================================================================= EMPRESA
-with abas[5]:
+with abas[6]:
     nomes = rk.set_index("ticker")["nome"]
     t = st.selectbox("Escolha a empresa", rk["ticker"], format_func=lambda x: f"{x} — {nomes[x]}")
     r = rk.set_index("ticker").loc[t]
@@ -548,6 +613,29 @@ with abas[5]:
                 f"- Analistas: preço-alvo {brl(r['alvo_analistas'])}" + (f" ({pct(r['potencial_analistas'])})" if r['potencial_analistas'] == r['potencial_analistas'] else "")))
     st.caption("80% de chance de o preço ficar entre o cenário ruim e o bom, segundo o comportamento passado da ação.")
 
+    st.markdown("**❄️ Raio-X comparado ao setor**")
+    fatores_ = ["Valor", "Renda", "Qualidade", "Saúde", "Momento"]
+    rx1, rx2 = st.columns([2, 3])
+    with rx1:
+        visual.floco({f_: r.get(f"pct_{f_}", float("nan")) for f_ in fatores_}, {f_: r.get(f"grau_{f_}", "—") for f_ in fatores_})
+    with rx2:
+        visual.cartoes([
+            ("Segurança dos dividendos", f"{r['seguranca_div']:.0f}/100" if r.get("seguranca_div") == r.get("seguranca_div") else "—",
+             "checagens aprovadas", "ok" if (r.get("seguranca_div") or 0) >= 70 else "alerta"),
+            ("Piotroski (força do balanço)", f"{r['f_score_9']:.0f}/9" if r.get("f_score_9") == r.get("f_score_9") else "—",
+             f"{int(r.get('f_testes', 0))} testes possíveis com os dados"),
+            ("Preço justo (dividendos descontados)", brl(r.get("preco_justo_ddm")),
+             (f"{pct(abs(r['margem_ddm']))} {'acima' if r['margem_ddm'] >= 0 else 'abaixo'} do preço" if r.get("margem_ddm") == r.get("margem_ddm") else ""),
+             "ok" if (r.get("margem_ddm") or -1) >= 0 else "alerta"),
+            ("Caixa livre que vira dividendo", pct(r.get("payout_fcl"), 0) if r.get("payout_fcl") not in (None, float("inf")) else
+             ("caixa negativo" if r.get("payout_fcl") == float("inf") else "—"), "abaixo de 100% = dividendo coberto"),
+        ])
+        with st.expander("Ver cada checagem"):
+            st.markdown("**Segurança dos dividendos**\n\n" + "\n".join(f"- {c}" for c in (r.get("seguranca_checks") or ["sem dados"])))
+            st.markdown("**Piotroski F-score**\n\n" + "\n".join(f"- {c}" for c in (r.get("f_detalhe") or ["sem balanços disponíveis"])))
+            st.caption(f"Preço justo por Gordon: proventos médios × (1 + crescimento até 5%) ÷ (taxa exigida − crescimento); "
+                       f"taxa exigida hoje = {pct(r.get('taxa_desconto'))}, que sobe quando a Selic sobe.")
+
     st.markdown("**📋 Saúde da empresa**")
     ind = pd.DataFrame([
         ("Lucro sobre o patrimônio (ROE)", pct(r["roe"]), "acima de 15% é bom"),
@@ -582,7 +670,7 @@ with abas[5]:
                      hide_index=True, width="stretch")
 
 # ======================================================================= CARTEIRA
-with abas[6]:
+with abas[7]:
     st.markdown("**Minha carteira** — digite as ações que você já tem e clique em Salvar. "
                 "O aporte do mês passa a completar o que está abaixo do alvo, e os alertas acompanham as suas ações.")
     base_cart = cart if not cart.empty else pd.DataFrame({"ticker": pd.Series(dtype=str), "quantidade": pd.Series(dtype=float),
@@ -612,7 +700,7 @@ with abas[6]:
         st.caption("'Evitar' numa ação que você já tem não é ordem de venda: é um sinal para olhar as notícias e os resultados.")
 
 # ======================================================================= BACKTEST
-with abas[7]:
+with abas[8]:
     bt = R.get("backtest")
     st.subheader("🧪 E se você tivesse seguido o sistema nos últimos 5 anos?")
     if not bt:
@@ -646,7 +734,7 @@ with abas[7]:
             st.dataframe(bt["compras"].iloc[::-1], hide_index=True, width="stretch")
 
 # ======================================================================= ALERTAS
-with abas[8]:
+with abas[9]:
     if not R["alertas"]:
         st.success("Nenhum alerta hoje.")
     icones = {"Oportunidade": "🟢", "Queda forte": "📉", "Provento": "💰", "Data-com": "📅", "Ranking": "🏆",
@@ -658,7 +746,7 @@ with abas[8]:
             (st.warning if a["nivel"] == 1 else st.info)(md(f"{icones.get(a['tipo'], '•')} **{a['tipo']}** — {a['texto']}"))
 
 # ======================================================================= COMO FUNCIONA
-with abas[9]:
+with abas[10]:
     st.markdown("""
 ### De onde vêm os dados (todos reais e atualizados a cada apuração)
 - **Cotações, proventos (dividendos + JCP) e balanço**: Yahoo Finance. A data da última cotação aparece no topo.

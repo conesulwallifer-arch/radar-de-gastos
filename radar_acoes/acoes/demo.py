@@ -34,7 +34,31 @@ def gerar(ticker: str, hoje: date | None = None) -> dict:
         "recommendationKey": rng.choice(["buy", "hold", "strong_buy", "underperform"]),
         "longBusinessSummary": "Empresa fictícia gerada para demonstração do Radar de Ações.",
     }
-    return {"ticker": ticker, "info": info, "precos": precos, "proventos": prov}
+    return {"ticker": ticker, "info": info, "precos": precos, "proventos": prov, "demos": _demos(rng, lpa, vpa, prov, hoje)}
+
+
+def _demos(rng, lpa: float, vpa: float, prov: pd.Series, hoje: pd.Timestamp) -> dict:
+    """Demonstrações anuais fictícias (3 anos), coerentes com o LPA/VPA gerados."""
+    acoes = float(rng.uniform(5e8, 5e9))
+    anos = [pd.Timestamp(hoje.year - k, 12, 31) for k in (1, 2, 3)]
+    cres = rng.uniform(-0.15, 0.20)
+    lucro = [lpa * acoes / (1 + cres) ** k for k in range(3)]
+    receita = [abs(l) / rng.uniform(0.05, 0.30) for l in lucro]
+    ativos = [vpa * acoes * rng.uniform(1.8, 4.0) for _ in range(3)]
+    fco = [l * rng.uniform(0.6, 1.6) for l in lucro]
+    capex = [-abs(f) * rng.uniform(0.2, 0.7) for f in fco]
+    divs = [-float(prov[prov.index.year == a.year].sum()) * acoes for a in anos]
+    def df(linhas):
+        return pd.DataFrame(linhas, index=anos).T
+    return {
+        "dre": df({"Net Income": lucro, "Total Revenue": receita, "Gross Profit": [r * rng.uniform(0.2, 0.5) for r in receita]}),
+        "balanco": df({"Total Assets": ativos, "Current Assets": [a * 0.3 for a in ativos],
+                       "Current Liabilities": [a * rng.uniform(0.15, 0.35) for a in ativos],
+                       "Long Term Debt": [a * rng.uniform(0.1, 0.4) for a in ativos],
+                       "Ordinary Shares Number": [acoes * rng.uniform(0.98, 1.02) for _ in anos]}),
+        "fluxo": df({"Operating Cash Flow": fco, "Capital Expenditure": capex,
+                     "Free Cash Flow": [f + c for f, c in zip(fco, capex)], "Cash Dividends Paid": divs}),
+    }
 
 
 def noticias(ticker: str) -> list[dict]:

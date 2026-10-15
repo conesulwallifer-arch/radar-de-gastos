@@ -190,3 +190,36 @@ def agentes(cards: list[dict]) -> None:
 def console(linhas: list[str], hora: str = "") -> None:
     corpo = "".join(f'<div><span class="h">{html.escape(hora)}</span>{html.escape(l)}</div>' for l in linhas)
     st.markdown(f'<div class="ag-console">{corpo}</div>', unsafe_allow_html=True)
+
+
+def floco(pcts: dict[str, float], graus: dict[str, str], tamanho: int = 300) -> None:
+    """Gráfico em 'floco' (radar) com as 5 notas por fator, comparadas ao setor (0–100). Quanto maior e mais verde, melhor."""
+    import math
+    nomes = list(pcts)
+    n = len(nomes)
+    cx = cy = tamanho / 2
+    raio = tamanho * 0.34
+    vals = [max(0.0, min(100.0, 0.0 if v != v else v)) / 100 for v in pcts.values()]
+    media = sum(vals) / n if n else 0
+    cor = VERDE if media >= 0.65 else AMBAR if media >= 0.45 else VERMELHO
+
+    def ponto(i, r):
+        ang = -math.pi / 2 + 2 * math.pi * i / n
+        return cx + r * math.cos(ang), cy + r * math.sin(ang)
+    aneis = "".join(
+        f'<polygon points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in (ponto(i, raio * k / 4) for i in range(n)))}" '
+        f'fill="none" stroke="#1E4A66" stroke-width="1"/>' for k in range(1, 5))
+    eixos = "".join(f'<line x1="{cx}" y1="{cy}" x2="{ponto(i, raio)[0]:.1f}" y2="{ponto(i, raio)[1]:.1f}" stroke="#1E4A66"/>' for i in range(n))
+    forma = " ".join(f"{x:.1f},{y:.1f}" for x, y in (ponto(i, raio * max(v, 0.04)) for i, v in enumerate(vals)))
+    rotulos = ""
+    for i, nome in enumerate(nomes):
+        x, y = ponto(i, raio + 30)
+        rotulos += (f'<text x="{x:.1f}" y="{y:.1f}" text-anchor="middle" font-family="Rajdhani,sans-serif" font-size="14" '
+                    f'font-weight="700" fill="#D9F7FF">{html.escape(nome)}</text>'
+                    f'<text x="{x:.1f}" y="{y + 16:.1f}" text-anchor="middle" font-family="Orbitron,sans-serif" font-size="13" '
+                    f'fill="{CIANO}">{html.escape(graus.get(nome, "—"))}</text>')
+    svg = (f'<svg viewBox="0 0 {tamanho} {tamanho}" width="100%" style="max-width:{tamanho}px" role="img" '
+           f'aria-label="Notas por fator comparadas ao setor">{aneis}{eixos}'
+           f'<polygon points="{forma}" fill="{cor}" fill-opacity=".28" stroke="{cor}" stroke-width="2.5" '
+           f'style="filter:drop-shadow(0 0 8px {cor})"/>{rotulos}</svg>')
+    st.markdown(f'<div style="display:flex;justify-content:center">{svg}</div>', unsafe_allow_html=True)

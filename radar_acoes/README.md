@@ -60,6 +60,26 @@ histórico de acertos no "cérebro"), e a Nina pesquisa a internet. Na aba **�
 a atividade, as contestações, o placar, o debate sobre cada ação e o cérebro de cada agente. Ao clicar em **Apurar agora**,
 as etapas aparecem ao vivo.
 
+## 🧭 Atlas, o agente com livre-arbítrio
+
+Os 7 especialistas seguem um roteiro. O **Atlas** não: ele decide sozinho o que investigar, usando ferramentas —
+consultar o ranking, abrir a ficha de qualquer ação (com os votos dos outros agentes), comparar, pesquisar na internet,
+**anotar na memória de longo prazo** (e ler as anotações dos dias anteriores para checar as próprias teses), **propor ações
+novas** para a equipe passar a analisar e levantar alertas. Limites: não compra, não vende, não mexe no seu plano;
+no máximo 12 passos, 5 anotações e 3 propostas por dia; proposta sem dados no Yahoo sai da lista sozinha.
+Sem chave da IA, ele roda por regras (quem mais melhorou/piorou, boas empresas esperando preço, divergências ranking × equipe).
+
+## O que veio dos melhores sistemas do mundo
+
+| Inspiração | O que o Radar faz |
+|---|---|
+| Notas por fator comparadas ao setor (Seeking Alpha Quant) | Notas de **F a A+** em Valor, Renda, Qualidade, Saúde e Momento, comparando cada ação com as do mesmo setor |
+| "Snowflake" com checagens objetivas (Simply Wall St) | **Raio-X em floco** de 5 eixos na ficha de cada empresa e **segurança dos dividendos** por 6 checagens |
+| Piotroski F-score e cobertura por caixa livre (scores de segurança de dividendos) | **F-score de 9 testes** com os balanços e **quanto do caixa livre vira dividendo** |
+| Preço-alvo / valor justo | Além de Bazin e Graham, **preço justo por dividendos descontados (Gordon)**, com taxa exigida que sobe com a Selic |
+| Agenda de dividendos e gestão de carteira (Investidor10, Status Invest) | **Agenda de proventos**: quanto você deve receber em cada um dos próximos 12 meses e as próximas datas-com |
+| Ratings que se dizem "preditivos" | Aqui tudo tem **placar real**: teste no passado sem colar, previsões registradas e conferidas, agentes que perdem peso quando erram |
+
 ## Como instalar (Windows, Mac ou Linux, Python 3.10+)
 
 ```bash
@@ -184,6 +204,9 @@ acoes/mesa.py        os 7 agentes, verificação cruzada e consenso (regras + IA
 acoes/previsor.py    Íris: chance de alta/queda em 1 mês, teste sem colar e placar real
 acoes/memoria.py     cérebro dos agentes: memória de votos e pesos aprendidos
 acoes/ia.py          acesso à IA Claude (opcional)
+acoes/atlas.py       Atlas: explorador autônomo com ferramentas, memória e propostas
+acoes/fundamentos.py Piotroski, caixa livre, segurança dos dividendos, preço justo por Gordon
+acoes/agenda.py      agenda de proventos dos próximos 12 meses e datas-com
 acoes/alertas.py     alertas do dia, Telegram e e-mail
 acoes/noticias.py    Google Notícias + tom e assunto
 acoes/demo.py        dados fictícios para testar sem internet

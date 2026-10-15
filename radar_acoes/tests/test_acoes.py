@@ -1,4 +1,5 @@
 """Testes sem internet:  python -m pytest radar_acoes/tests -q"""
+import json
 import os
 import sys
 
@@ -218,3 +219,71 @@ def test_previsor_sem_vantagem_fica_neutro():
     assert 0.40 < val["acerto"] < 0.60  # passeio aleatório: ninguém prevê
     if fator == 0:
         assert (cal["direcao"] == "Indefinida").all()
+
+
+# ---------------------------------------------------------------- balanços, notas setoriais, agenda, Atlas
+from acoes import agenda, atlas, fundamentos  # noqa: E402
+
+
+def _demos(lucro, ativos, fco, capex, divs, acoes=(1e9, 1e9, 1e9), receita=(100, 90, 80), bruto=(40, 34, 30)):
+    anos = [pd.Timestamp(2025, 12, 31), pd.Timestamp(2024, 12, 31), pd.Timestamp(2023, 12, 31)]
+    df = lambda d: pd.DataFrame(d, index=anos).T  # noqa: E731
+    return {"dre": df({"Net Income": lucro, "Total Revenue": receita, "Gross Profit": bruto}),
+            "balanco": df({"Total Assets": ativos, "Current Assets": [a * .3 for a in ativos], "Current Liabilities": [a * .2 for a in ativos],
+                           "Long Term Debt": [a * .2 for a in ativos], "Ordinary Shares Number": list(acoes)}),
+            "fluxo": df({"Operating Cash Flow": fco, "Capital Expenditure": capex, "Cash Dividends Paid": divs})}
+
+
+def test_piotroski_e_cobertura_por_caixa():
+    bom = fundamentos.extrair(_demos([12, 10, 9], [100, 100, 100], [15, 12, 11], [-5, -5, -5], [-6, -5, -5]))
+    p = fundamentos.piotroski(bom)
+    assert p["f_testes"] == 9 and p["f_score"] >= 7
+    c = fundamentos.caixa(bom, 10.0, 0.6)
+    assert c["fcl"] == 10 and c["payout_fcl"] == pytest.approx(0.6)
+    ruim = fundamentos.extrair(_demos([-2, 5, 6], [100, 100, 100], [-1, 6, 7], [-5, -5, -5], [-4, -4, -4], acoes=(1.2e9, 1e9, 1e9),
+                                         receita=(80, 90, 100), bruto=(24, 30, 40)))
+    assert fundamentos.piotroski(ruim)["f_score"] <= 3
+    assert fundamentos.caixa(ruim, 10.0, 0.4)["payout_fcl"] == float("inf")  # paga com caixa livre negativo
+
+
+def test_ddm_reage_a_selic_e_bancos_sem_dados():
+    alto = fundamentos.preco_justo_ddm(1.0, 0.03, 0.15)
+    baixo = fundamentos.preco_justo_ddm(1.0, 0.03, 0.08)
+    assert baixo > alto > 0  # juros maiores exigem preço menor
+    banco = fundamentos.analisar({"preco": 10, "proventos_media_5a": 0.8, "setor": "Bancos", "anos_pagou_10": 10,
+                                  "payout": 0.5, "roe": 0.2, "cresc_proventos_5a": 0.05}, None, 0.14)
+    assert banco["f_score_9"] != banco["f_score_9"]  # sem balanço: não inventa nota
+    assert banco["seguranca_div"] == 100  # checagens disponíveis todas aprovadas
+
+
+def test_notas_setoriais_comparam_dentro_do_setor():
+    base = {f"B{n}A3": ativo(f"B{n}A3", preco=10 + 2 * n) for n in range(5)}
+    rk = analise.ranking(base, hoje=HOJE)
+    assert {"grau_Valor", "grau_Renda", "pct_Valor"} <= set(rk.columns)
+    mais_barata = rk.sort_values("preco").iloc[0]
+    assert mais_barata["pct_Valor"] == rk["pct_Valor"].max()
+
+
+def test_agenda_projeta_meses_de_pagamento():
+    d = ativo("AGD3")
+    rk = analise.ranking({"AGD3": d}, hoje=HOJE)
+    rk["proventos_previstos_12m"] = 0.8
+    pj = agenda.projetar({"AGD3": 100}, {"AGD3": d["proventos"]}, rk, HOJE.date())
+    assert set(pj["mes"].str[:3]) == {"mar", "set"}
+    assert pj["valor"].sum() == pytest.approx(80, rel=0.01)
+
+
+def test_atlas_regras_e_limites(tmp_path, monkeypatch):
+    monkeypatch.setattr(atlas, "NOTAS", tmp_path / "n.json")
+    monkeypatch.setattr(atlas, "DESCOBERTAS", tmp_path / "d.txt")
+    R = _R()
+    f = atlas.Ferramentas(R)
+    assert json.loads(f.executar("propor_vigiar", {"ticker": "abc", "motivo": "x"}))["erro"]  # código inválido
+    assert json.loads(f.executar("propor_vigiar", {"ticker": "KEPL3", "motivo": "x"}))["ok"]
+    assert "erro" in json.loads(f.executar("propor_vigiar", {"ticker": R["ranking"].iloc[0]["ticker"], "motivo": "x"}))
+    for k in range(atlas.MAX_NOTAS_DIA + 1):
+        r = json.loads(f.executar("anotar", {"texto": f"nota {k}", "ticker": ""}))
+    assert "erro" in r and len(atlas.ler_notas()) == atlas.MAX_NOTAS_DIA
+    atlas.limpar_descobertas(["KEPL3"])
+    assert atlas.ler_descobertas() == []
+    assert atlas.explorar(R, None, "", usar_ia=False)["modo"] == "regras"

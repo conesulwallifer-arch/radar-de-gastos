@@ -78,6 +78,15 @@ class Renda(Agente):
             o.add(-1, f"Paga mais do que lucra (payout {_p(pay, 0)}): não é sustentável.")
         if _ok(r.get("dy_12m")) and _ok(dy) and dy > 0 and r["dy_12m"] > 2 * dy:
             o.argumentos.append("Atenção: os últimos 12 meses tiveram provento extraordinário, que pode não se repetir.")
+        seg = r.get("seguranca_div")
+        if _ok(seg):
+            falhas = [c[2:] for c in (r.get("seguranca_checks") or []) if c.startswith("❌")]
+            if seg >= 80:
+                o.add(1, f"Dividendos seguros: {seg:.0f}/100 nas checagens de segurança.")
+            elif seg <= 40:
+                o.add(-1, f"Dividendos em risco: só {seg:.0f}/100 nas checagens" + (f" (falhou: {', '.join(falhas[:2]).lower()})." if falhas else "."))
+            else:
+                o.argumentos.append(f"Segurança dos dividendos: {seg:.0f}/100.")
         o.voto = int(np.clip(o.voto, -2, 2))
         return o
 
@@ -109,6 +118,17 @@ class Fundamentos(Agente):
             o.add(-1, f"Lucro caiu {_p(-cl)} no último ano.")
         elif _ok(cl) and cl >= 0.15:
             o.add(1, f"Lucro cresceu {_p(cl)} no último ano.")
+        fs = r.get("f_score_9")
+        if _ok(fs):
+            if fs >= 7:
+                o.add(1, f"Piotroski {fs:.0f}/9: balanço melhorando em quase todos os testes.")
+            elif fs <= 3:
+                o.add(-1, f"Piotroski {fs:.0f}/9: balanço piorando.")
+            else:
+                o.argumentos.append(f"Piotroski {fs:.0f}/9.")
+        g = r.get("grau_Qualidade")
+        if g and g != "—":
+            o.argumentos.append(f"Nota de Qualidade comparada ao setor: {g}.")
         o.voto = int(np.clip(o.voto, -2, 2))
         return o
 
@@ -132,6 +152,15 @@ class Valuation(Agente):
                 o.add(-1, f"Um pouco acima do preço-teto ({_p(-mb)}).")
         if _ok(mg) and mg >= 0.30:
             o.add(1, f"Preço justo de Graham {_p(mg)} acima do preço atual.")
+        md_ = r.get("margem_ddm")
+        if _ok(md_):
+            o.argumentos.append(f"Pelo modelo de dividendos descontados (Gordon), o preço justo é "
+                                f"{_p(abs(md_))} {'acima' if md_ >= 0 else 'abaixo'} do preço atual.")
+            if md_ >= 0.15:
+                o.add(1, "Os dividendos futuros, trazidos a valor presente, justificam um preço bem maior.")
+        g = r.get("grau_Valor")
+        if g and g != "—":
+            o.argumentos.append(f"Nota de Valor comparada ao setor: {g}.")
         pl = r.get("pl")
         if _ok(pl) and pl > 20:
             o.add(-1, f"P/L alto ({pl:.0f} anos de lucro no preço).")
@@ -243,6 +272,9 @@ class Risco(Agente):
             o.add(-1, f"Oscila demais ({_p(vol, 0)} ao ano).")
         elif _ok(vol) and vol < 0.25:
             o.add(1, f"Ação estável (oscilação de {_p(vol, 0)} ao ano).")
+        pf = r.get("payout_fcl")
+        if pf == float("inf"):
+            o.add(-1, "Paga dividendos com caixa livre negativo: está se financiando para pagar.")
         dd = r.get("queda_max_5a")
         if _ok(dd) and dd < -0.50:
             o.add(-1, f"Já caiu {_p(-dd, 0)} do topo nos últimos 5 anos.")
@@ -298,6 +330,10 @@ def verificacao_cruzada(rk: pd.DataFrame, opinioes: dict, ctx: dict) -> list[dic
             elif _ok(cl) and cl <= -0.25:
                 contestar("fundamentos", "renda", t, f"o lucro caiu {_p(-cl)}; os proventos tendem a cair junto.",
                           ops["renda"]["voto"] - 1)
+            elif _ok(r.get("payout_fcl")) and r["payout_fcl"] > 1.2:
+                txt = ("o caixa livre é negativo" if r["payout_fcl"] == float("inf")
+                       else f"os dividendos consomem {_p(r['payout_fcl'], 0)} do caixa livre")
+                contestar("fundamentos", "renda", t, f"{txt}: pagamento financiado, não sustentável.", ops["renda"]["voto"] - 1)
         # Dora (dividendos) confere Vitória (valuation): o preço-teto está inflado?
         if ops["valuation"]["voto"] > 0:
             dy12, dy5, g = r.get("dy_12m"), r.get("dy_medio_5a"), r.get("cresc_proventos_5a")
@@ -346,7 +382,9 @@ def _revisao_ia(agente: Agente, cand: pd.DataFrame, opinioes: dict, ctx: dict, p
                       **{k: (None if not _ok(r.get(k)) else (round(float(r[k]), 4) if isinstance(r[k], (int, float, np.floating)) else r[k]))
                          for k in ("preco", "preco_teto_bazin", "margem_bazin", "dy_medio_5a", "dy_12m", "anos_pagou_10",
                                    "cresc_proventos_5a", "payout", "roe", "margem_liquida", "divida_pl", "pl", "pvp",
-                                   "volatilidade", "queda_max_5a", "confianca")},
+                                   "volatilidade", "queda_max_5a", "confianca", "f_score_9", "payout_fcl",
+                                   "seguranca_div", "preco_justo_ddm", "grau_Valor", "grau_Renda", "grau_Qualidade",
+                                   "grau_Saúde", "grau_Momento")},
                       "parecer_das_regras": opinioes[r["ticker"]][agente.id]})
     sistema = (f"Você é {agente.apelido}, o(a) {agente.nome} de uma mesa de análise de ações brasileiras para investidor de longo prazo focado em "
                f"renda (dividendos/JCP) e aportes mensais. Sua especialidade: {agente.especialidade} "

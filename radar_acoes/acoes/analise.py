@@ -7,7 +7,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from . import universo
+from . import fundamentos, universo
 
 DY_MINIMO_BAZIN = 0.06  # Bazin: só compra se o dividendo médio render pelo menos 6% ao ano
 
@@ -75,6 +75,8 @@ def indicadores(d: dict, hoje: pd.Timestamp | None = None) -> dict:
     var12 = float(precos.iloc[-1] / precos[precos.index <= hoje - pd.DateOffset(years=1)].iloc[-1] - 1) \
         if len(precos[precos.index <= hoje - pd.DateOffset(years=1)]) else np.nan
     var_dia = float(precos.iloc[-1] / precos.iloc[-2] - 1) if len(precos) > 1 else np.nan
+    p6 = precos[precos.index <= hoje - pd.DateOffset(months=6)]
+    var6 = float(precos.iloc[-1] / p6.iloc[-1] - 1) if len(p6) else np.nan
 
     # ---- Fundamentos ----
     lpa, vpa = _num(info.get("trailingEps")), _num(info.get("bookValue"))
@@ -103,7 +105,7 @@ def indicadores(d: dict, hoje: pd.Timestamp | None = None) -> dict:
         "data_cotacao": precos.index[-1].date().isoformat() if not precos.empty else None,
         "preco_historico": preco_hist,
         "proventos_mediana_pagamento": float(prov[prov.index > hoje - pd.DateOffset(years=5)].median()) if not prov.empty else np.nan,
-        "setor": universo.setor(t, info.get("sector")), "preco": preco, "var_dia": var_dia, "var_12m": var12,
+        "setor": universo.setor(t, info.get("sector")), "preco": preco, "var_dia": var_dia, "var_12m": var12, "var_6m": var6,
         "dy_12m": ult12 / preco if preco else np.nan, "dy_medio_5a": media5 / preco if preco else np.nan,
         "proventos_12m": ult12, "proventos_media_5a": media5, "proventos_media_3a": media3,
         "anos_pagou_10": anos_pagou, "anos_historico": anos_hist, "cresc_proventos_5a": cagr_div,
@@ -141,6 +143,7 @@ def nota(i: dict, saldo_noticias: float = 0.0) -> dict:
         (_escala(i["anos_pagou_10"] / max(1, min(10, i["anos_historico"])), 0.5, 1.0), 1),
         (_escala(i["cresc_proventos_5a"], -0.05, 0.10), 1),
         (_escala(i["estabilidade_proventos"], 0.8, 0.15), 1),
+        (_escala(i.get("seguranca_div", np.nan), 30, 90), 1.3),
     ])
     payout = i["payout"]
     s_payout = np.nan if payout != payout else (
@@ -151,12 +154,15 @@ def nota(i: dict, saldo_noticias: float = 0.0) -> dict:
         (np.nan if financeira else _escala(i["divida_pl"], 2.0, 0.3), 1),
         (s_payout, 1),
         (1.0 if i["lpa"] == i["lpa"] and i["lpa"] > 0 else 0.0, 1),
+        (_escala(i.get("f_score_9", np.nan), 3, 8), 1.2),
+        (_escala(i.get("payout_fcl", np.nan), 1.3, 0.6) if i.get("payout_fcl", np.nan) != float("inf") else 0.0, 0.8),
     ])
     preco = _media([
         (_escala(i["margem_bazin"], -0.40, 0.20), 1.5),
         (_escala(i["margem_graham"], -0.40, 0.30), 1),
         (_escala(i["pl"], 20, 5) if i["pl"] == i["pl"] and i["pl"] > 0 else 0.0, 1),
         (_escala(i["pvp"], 3.0, 0.8), 0.5),
+        (_escala(i.get("margem_ddm", np.nan), -0.40, 0.20), 1.0),
     ])
     risco = _media([
         (_escala(i["volatilidade"], 0.50, 0.18), 1),
@@ -247,7 +253,7 @@ def explicar(i: dict) -> str:
 
 
 def ranking(dados: dict[str, dict], noticias_saldo: dict[str, float] | None = None,
-            hoje: pd.Timestamp | None = None) -> pd.DataFrame:
+            hoje: pd.Timestamp | None = None, selic: float | None = None) -> pd.DataFrame:
     noticias_saldo = noticias_saldo or {}
     linhas = []
     for t, d in dados.items():
@@ -256,6 +262,10 @@ def ranking(dados: dict[str, dict], noticias_saldo: dict[str, float] | None = No
         except Exception as e:  # noqa: BLE001
             print(f"  [aviso] {t}: não deu para calcular ({e})")
             continue
+        try:
+            i.update(fundamentos.analisar(i, d.get("demos"), selic))
+        except Exception as e:  # noqa: BLE001
+            print(f"  [aviso] {t}: balanços indisponíveis ({e})")
         i.update(nota(i, noticias_saldo.get(t, 0.0)))
         i["confianca"], avisos = confianca(i, hoje)
         i["avisos_dados"] = " · ".join(avisos)
@@ -269,4 +279,44 @@ def ranking(dados: dict[str, dict], noticias_saldo: dict[str, float] | None = No
         return pd.DataFrame()
     df = pd.DataFrame(linhas).sort_values("nota", ascending=False).reset_index(drop=True)
     df.insert(0, "posicao", range(1, len(df) + 1))
+    return graus_setoriais(df)
+
+
+# ------------------------------------------------------------------ notas por fator, comparando com o próprio setor
+FATORES = {
+    "Valor": [("margem_bazin", 1), ("margem_ddm", 1), ("pl", -1), ("pvp", -1)],
+    "Renda": [("dy_medio_5a", 1), ("seguranca_div", 1), ("cresc_proventos_5a", 1), ("anos_pagou_10", 1)],
+    "Qualidade": [("roe", 1), ("margem_liquida", 1), ("f_score_9", 1)],
+    "Saúde": [("divida_pl", -1), ("payout_fcl", -1), ("volatilidade", -1), ("queda_max_5a", 1)],
+    "Momento": [("var_12m", 1), ("var_6m", 1)],
+}
+GRAUS = [(0.92, "A+"), (0.82, "A"), (0.72, "A-"), (0.62, "B+"), (0.52, "B"), (0.42, "B-"), (0.32, "C"), (0.20, "D")]
+
+
+def _grau(p: float) -> str:
+    if p != p:
+        return "—"
+    return next((g for lim, g in GRAUS if p >= lim), "F")
+
+
+def graus_setoriais(df: pd.DataFrame) -> pd.DataFrame:
+    """Para cada fator, o percentil da ação dentro do seu setor (setor com < 4 ações: compara com todas)."""
+    df = df.copy()
+    if "var_6m" not in df:
+        df["var_6m"] = np.nan
+    for fator, metricas in FATORES.items():
+        partes = []
+        for col, sentido in metricas:
+            if col not in df:
+                continue
+            x = pd.to_numeric(df[col], errors="coerce").replace([np.inf, -np.inf], np.nan) * sentido
+            if col == "divida_pl":
+                x = x.where(~df["setor"].isin(fundamentos.FINANCEIRAS))
+            tam = df.groupby("setor")["ticker"].transform("size")
+            no_setor = x.groupby(df["setor"]).rank(pct=True)
+            geral = x.rank(pct=True)
+            partes.append(no_setor.where(tam >= 4, geral))
+        pct = pd.concat(partes, axis=1).mean(axis=1, skipna=True) if partes else pd.Series(np.nan, index=df.index)
+        df[f"pct_{fator}"] = (pct * 100).round(0)
+        df[f"grau_{fator}"] = pct.map(_grau)
     return df

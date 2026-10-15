@@ -19,7 +19,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, DADOS, alertas, analise, aporte, backtest, dados, demo, jarvis, macro, memoria, mesa, meta, noticias, plano, previsao, previsor, universo  # noqa: E402
+from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, dados, demo, jarvis, macro, memoria, mesa, meta, noticias, plano, previsao, previsor, universo  # noqa: E402
 
 HIST = DADOS / "historico"
 REL = DADOS / "relatorios"
@@ -48,11 +48,14 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     falar(f"📡 Coletando cotações, proventos e balanços de {len(tickers)} empresas...")
     base = {t: demo.gerar(t) for t in tickers} if usar_demo else dados.coletar_varios(tickers, forcar=forcar)
     sem_dados = [t for t in tickers if t not in base]
+    if not usar_demo:
+        atlas.limpar_descobertas(sem_dados)  # propostas do Atlas sem dados no Yahoo saem da lista
     if not base:
         raise SystemExit("Nenhum dado coletado. Verifique a internet (ou rode com --demo).")
 
     print("2/5 Calculando indicadores e notas...")
-    rk = analise.ranking(base)
+    selic_hoje = macro.indicadores()["selic"]  # usado no preço justo por dividendos descontados
+    rk = analise.ranking(base, selic=selic_hoje)
 
     print("3/5 Buscando notícias...")
     falar("📰 Buscando as notícias das 30 primeiras e da sua carteira...")
@@ -63,7 +66,7 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
             if t in base:
                 nome = base[t]["info"].get("shortName") or base[t]["info"].get("longName")
                 news[t] = demo.noticias(t) if usar_demo else noticias.buscar(t, nome, dias=30)
-        rk = analise.ranking(base, {t: noticias.resumo(v)["saldo"] for t, v in news.items()})
+        rk = analise.ranking(base, {t: noticias.resumo(v)["saldo"] for t, v in news.items()}, selic=selic_hoje)
 
     print("4/5 Fazendo previsões...")
     falar("📊 Calculando previsões de proventos e de preço (1, 3 e 5 anos)...")
@@ -164,9 +167,18 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
                  "macro": mac, "backtest": bt, "carteira_esperada": cart_esp, "ibov": ibov,
                  "mesa": reuniao, "previsor": {"validacao": validacao, "fator": fator, "placar_real": placar}}
     print("🤖 JARVIS escrevendo o relatório do dia" + (" (IA + pesquisa na web)..." if usar_ia and jarvis.ia_disponivel() else "..."))
+    falar("🧭 **Atlas** (explorador autônomo) está decidindo por conta própria o que investigar...")
+    resumo_atlas = mesa.resumo_texto(reuniao) + "\n" + "\n".join(
+        f"{int(r['posicao'])}. {r['ticker']} nota {r['nota']:.0f} sinal {r['sinal']} consenso {r.get('consenso')}"
+        for _, r in rk.head(15).iterrows())
+    resultado["atlas"] = atlas.explorar(resultado, anterior(hoje), resumo_atlas, usar_ia=usar_ia)
+    for passo in resultado["atlas"]["diario"]:
+        falar("   🧭 Atlas " + passo)
+    resultado["alertas"] = sorted(alts + resultado["atlas"]["alertas"], key=lambda a: (a["nivel"], a["ticker"]))
     falar("🤖 **JARVIS** está escrevendo o relatório do dia...")
     resultado["jarvis"] = jarvis.relatorio(resultado, pl, usar_ia=usar_ia)
     texto = "🤖 J.A.R.V.I.S.\n\n" + resultado["jarvis"]["texto"].replace("**", "") + "\n\n" + "─" * 20 + "\n\n" + texto
+    texto = texto.replace("─" * 20, "🧭 Atlas, o explorador:\n" + resultado["atlas"]["relatorio"].replace("**", "") + "\n\n" + "─" * 20, 1)
     (REL / f"relatorio_{hoje:%Y-%m-%d}.txt").write_text(texto, encoding="utf-8")
     with open(ULTIMO, "wb") as f:
         pickle.dump(resultado, f)

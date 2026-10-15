@@ -49,7 +49,13 @@ def coletar(ticker: str, forcar: bool = False, tentativas: int = 3) -> dict | No
             except Exception:  # noqa: BLE001
                 info_bruto = {}
             info = {k: info_bruto.get(k) for k in CAMPOS_INFO}
-            d = {"ticker": ticker, "info": info, "precos": precos, "proventos": proventos}
+            demos = {}
+            for nome, metodo in (("dre", "get_income_stmt"), ("balanco", "get_balance_sheet"), ("fluxo", "get_cashflow")):
+                try:
+                    demos[nome] = getattr(tk, metodo)(pretty=True, freq="yearly")
+                except Exception:  # noqa: BLE001  (demonstrações são opcionais: sem elas, só pulamos os testes)
+                    demos[nome] = None
+            d = {"ticker": ticker, "info": info, "precos": precos, "proventos": proventos, "demos": demos}
             for velho in CACHE.glob(f"{ticker}_*.pkl"):
                 velho.unlink(missing_ok=True)
             with open(arq, "wb") as f:

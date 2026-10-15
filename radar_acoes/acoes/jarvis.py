@@ -91,6 +91,7 @@ def contexto(R: dict, pl: dict | None = None, cart: pd.DataFrame | None = None) 
         "teste_no_passado": {k: bt.get(k) for k in ("meses", "investido", "sistema", "tir_sistema", "cdi", "tir_cdi", "ibovespa", "tir_ibovespa")} if bt else None,
         "mesa_de_analistas": ({"resumo": mesa_mod.resumo_texto(R["mesa"]), "atividade": R["mesa"]["log"]} if R.get("mesa") else None),
         "previsora_iris": _iris(R),
+        "atlas_explorador": (R.get("atlas") or {}).get("relatorio"),
         "noticias_recentes": {t: [f"{n['titulo']} ({n['fonte']}, tom {n['tom']})" for n in v[:4]]
                               for t, v in (R.get("noticias") or {}).items() if t in {x["ticker"] for _, x in rk.head(10).iterrows()}},
     }
@@ -158,6 +159,8 @@ def relatorio_regras(c: dict) -> list[str]:
         linhas.append(f"🧠 Mesa de analistas (Dora, Fausto, Vitória, Téo, Nina, Íris e Rex): {c['mesa_de_analistas']['resumo']}.")
     if c.get("previsora_iris"):
         linhas.append(texto_iris(c))
+    if c.get("atlas_explorador"):
+        linhas.append("🧭 Atlas, explorando por conta própria: " + c["atlas_explorador"].splitlines()[0])
     if c["alertas_importantes"]:
         linhas.append(f"🔔 {len(c['alertas_importantes'])} alerta(s) importante(s). Principal: {c['alertas_importantes'][0]}")
     if c["dados_duvidosos"]:
