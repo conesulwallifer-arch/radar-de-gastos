@@ -1,19 +1,24 @@
-name: Radar de Ações (apuração diária)
+name: Radar de Ações — agente JARVIS
 
 on:
   schedule:
-    - cron: "30 21 * * 1-5"   # dias úteis, 18h30 de Brasília (após o fechamento da B3)
+    - cron: "30 21 * * 1-5"    # dias úteis, 18h30 de Brasília: apuração completa + relatório do JARVIS
+    - cron: "15 13-20 * * 1-5" # dias úteis, de hora em hora das 10h15 às 17h15 de Brasília: vigilância do pregão
   workflow_dispatch:
     inputs:
-      aporte:
-        description: "Valor do aporte do mês (R$)"
+      modo:
+        description: "agora = apuração completa; checar = só vigilância de preços"
         required: false
-        default: ""
+        default: "agora"
+
+concurrency:
+  group: radar-acoes
+  cancel-in-progress: false
 
 jobs:
-  apurar:
+  jarvis:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: radar_acoes
@@ -25,32 +30,40 @@ jobs:
           cache: pip
           cache-dependency-path: radar_acoes/requirements.txt
       - run: pip install -r requirements.txt
-      # guarda o histórico entre execuções para detectar o que mudou de um dia para o outro
+      # guarda a última apuração, o histórico e o estado da vigilância entre execuções
       - uses: actions/cache@v4
         with:
-          path: radar_acoes/dados_acoes/historico
-          key: radar-acoes-historico-${{ github.run_id }}
-          restore-keys: radar-acoes-historico-
-      - name: Carteira (opcional, do segredo CARTEIRA_CSV)
+          path: radar_acoes/dados_acoes
+          key: radar-acoes-${{ github.run_id }}
+          restore-keys: radar-acoes-
+      - name: Seu plano e carteira (opcional, dos segredos)
         env:
           CARTEIRA_CSV: ${{ secrets.CARTEIRA_CSV }}
+          PLANO_JSON: ${{ secrets.PLANO_JSON }}
         run: |
           mkdir -p dados_acoes
           if [ -n "$CARTEIRA_CSV" ]; then printf '%s\n' "$CARTEIRA_CSV" > dados_acoes/carteira.csv; fi
-      - name: Apurar e enviar alertas
+          if [ -n "$PLANO_JSON" ]; then printf '%s\n' "$PLANO_JSON" > dados_acoes/plano.json; fi
+      - name: JARVIS trabalhando
         env:
-          APORTE_MENSAL: ${{ github.event.inputs.aporte || vars.APORTE_MENSAL }}
+          TZ: America/Sao_Paulo
+          APORTE_MENSAL: ${{ vars.APORTE_MENSAL }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
           EMAIL_SENHA: ${{ secrets.EMAIL_SENHA }}
           EMAIL_DESTINO: ${{ secrets.EMAIL_DESTINO }}
-        run: python apurar.py
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ "${{ github.event.schedule }}" = "15 13-20 * * 1-5" ] || [ "${{ github.event.inputs.modo }}" = "checar" ]; then
+            python agente.py --checar
+          else
+            python agente.py --agora
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: relatorio-acoes
-          path: |
-            radar_acoes/dados_acoes/relatorios/
-            radar_acoes/dados_acoes/historico/
+          name: relatorio-jarvis
+          path: radar_acoes/dados_acoes/relatorios/
+          if-no-files-found: ignore
           retention-days: 30

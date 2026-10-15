@@ -4,3 +4,4 @@ requests>=2.31
 yfinance>=0.2.54
 streamlit>=1.50
 altair>=5.0
+anthropic>=1.0  # opcional: só é usado se você colocar ANTHROPIC_API_KEY (JARVIS com IA e pesquisa na web)

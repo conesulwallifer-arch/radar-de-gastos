@@ -11,10 +11,11 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, aporte, meta, plano, universo  # noqa: E402
+from acoes import AVISO, aporte, jarvis, meta, plano, universo, visual  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
 
-st.set_page_config(page_title="Radar de Ações", page_icon="📈", layout="wide")
+st.set_page_config(page_title="J.A.R.V.I.S. · Radar de Ações", page_icon="🤖", layout="wide")
+visual.aplicar()
 
 COR_SINAL = {"Comprar": "🟢", "Acumular": "🟡", "Aguardar": "🟠", "Evitar": "🔴"}
 COR_CONF = {"Alta": "✅ Alta", "Média": "⚠️ Média", "Baixa": "❌ Baixa"}
@@ -25,6 +26,11 @@ def brl(x, casas: int = 2) -> str:
     if x is None or x != x:
         return "—"
     return f"R$ {x:,.{casas}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def md(texto: str) -> str:
+    """Escapa o $ de "R$" para o Streamlit não interpretar como fórmula matemática."""
+    return texto.replace("$", r"\$")
 
 
 def pct(x, casas: int = 1) -> str:
@@ -56,11 +62,13 @@ def rodar(demo: bool):
 
 
 # ======================================================================= topo
-st.title("📈 Radar de Ações")
-st.caption("Renda passiva e patrimônio no longo prazo, com dados reais atualizados todo dia. " + AVISO)
-
+pl = plano.ler()
 with st.sidebar:
-    st.header("Atualizar")
+    st.header("Comando")
+    nome = st.text_input("Como o JARVIS deve te chamar?", pl.get("nome", ""), placeholder="ex.: Tony")
+    if nome != pl.get("nome", ""):
+        pl["nome"] = nome.strip()
+        plano.salvar(pl)
     if st.button("🔄 Apurar agora (dados reais)", width="stretch", type="primary"):
         rodar(False)
     if st.button("🧪 Testar com dados fictícios", width="stretch"):
@@ -70,17 +78,14 @@ with st.sidebar:
 
 R = carregar(ULTIMO.stat().st_mtime if ULTIMO.exists() else 0)
 if R is None:
+    visual.topo("Radar de Ações · inteligência para renda e patrimônio", [("AGUARDANDO PRIMEIRA APURAÇÃO", "alerta")])
     st.info("Ainda não há apuração. Clique em **🔄 Apurar agora** na barra lateral (precisa de internet).")
     st.stop()
 
 rk: pd.DataFrame = R["ranking"]
 mac: dict = R.get("macro") or {"selic": 0.14, "ipca_12m": 0.045, "cdi_liquido": 0.119, "estimado": True}
-pl = plano.ler()
 cart = aporte.ler_carteira()
 
-if R.get("demo"):
-    st.error("⚠️ **MODO DEMONSTRAÇÃO — NÚMEROS FICTÍCIOS.** Nada aqui vale para investir. "
-             "Clique em **🔄 Apurar agora (dados reais)** na barra lateral.")
 
 # barra de "frescor" dos dados: o usuário sempre sabe de quando é cada número
 datas = pd.to_datetime(rk["data_cotacao"].dropna()) if "data_cotacao" in rk else pd.Series(dtype="datetime64[ns]")
@@ -90,9 +95,23 @@ fresco = (f"📅 Apuração de **{R['data']:%d/%m/%Y}** · cotações até **{ul
           if ult_cot is not None else f"📅 Apuração de **{R['data']:%d/%m/%Y}** · ")
 fresco += (f"Selic **{pct(mac['selic'], 2)}**, IPCA 12m **{pct(mac['ipca_12m'], 2)}** "
            + ("(⚠️ estimados: Banco Central fora do ar)" if mac.get("estimado") else "(Banco Central)"))
-(st.warning if atraso > 3 else st.caption)(fresco + (" — **dados com mais de 3 dias úteis: clique em Apurar agora.**" if atraso > 3 else ""))
+chips = [("ONLINE", "on"),
+         (f"COTAÇÕES {ult_cot:%d/%m/%Y}" if ult_cot is not None else "SEM COTAÇÕES", "alerta" if atraso > 3 else ""),
+         (f"SELIC {pct(mac['selic'], 2)}", "alerta" if mac.get("estimado") else ""),
+         (f"{len(rk)} EMPRESAS", ""),
+         ("IA + PESQUISA WEB" if jarvis.ia_disponivel() else "MODO LOCAL (SEM IA)", "" if jarvis.ia_disponivel() else "alerta")]
+if R.get("demo"):
+    chips.insert(1, ("DADOS FICTÍCIOS", "perigo"))
+visual.topo(f"{jarvis.saudacao(pl.get('nome', ''))}. Radar de Ações · inteligência para renda e patrimônio", chips)
+if atraso > 3:
+    st.warning(fresco + " — **dados com mais de 3 dias úteis: clique em Apurar agora.**")
+else:
+    st.caption(fresco)
+if R.get("demo"):
+    st.error("⚠️ **MODO DEMONSTRAÇÃO — NÚMEROS FICTÍCIOS.** Nada aqui vale para investir. "
+             "Clique em **🔄 Apurar agora (dados reais)** na barra lateral.")
 
-abas = st.tabs(["✅ O que fazer hoje", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
+abas = st.tabs(["🤖 JARVIS", "✅ O que fazer hoje", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
                 "🧪 O sistema funciona?", "🔔 Alertas", "❓ Como funciona e limites"])
 
 # carteira-alvo e números da meta, usados em várias abas
@@ -100,8 +119,56 @@ esc = aporte.escolher(rk, 10, 2)
 cart_esp = R.get("carteira_esperada") or meta.carteira_esperada(esc)
 pat_hoje = plano.patrimonio_atual(pl, cart, rk)
 
-# ======================================================================= HOJE
+# ======================================================================= JARVIS
 with abas[0]:
+    jv = R.get("jarvis") or jarvis.relatorio(R, pl, usar_ia=False)
+    sim0 = meta.simular(pl["meta"], pat_hoje, pl["aporte_mensal"], cart_esp["retorno"], cart_esp["volatilidade"],
+                        pl["aumento_aporte_aa"], mac["ipca_12m"] if pl["corrigir_inflacao"] else 0.0)
+    progresso = min(1.0, pat_hoje / pl["meta"]) if pl["meta"] else 0.0
+    melhor = rk[rk["sinal"] == "Comprar"].head(1)
+    visual.cartoes([
+        ("Rumo à meta", f"{progresso * 100:.1f}%".replace(".", ","), f"{brl(pat_hoje, 0)} de {brl(pl['meta'], 0)}", ""),
+        ("Chegada mais provável", meta.fmt_tempo(sim0["meses_50"]), f"anos ruins: {meta.fmt_tempo(sim0['meses_90'])}", "alerta"),
+        ("Melhor oportunidade", melhor["ticker"].iloc[0] if len(melhor) else "nenhuma hoje",
+         f"{pct(melhor['margem_bazin'].iloc[0])} abaixo do teto" if len(melhor) else "aguarde preço bom", "ok" if len(melhor) else "alerta"),
+        ("Alertas importantes", str(sum(a["nivel"] == 1 for a in R["alertas"])), "veja a aba 🔔", "perigo" if any(a["nivel"] == 1 for a in R["alertas"]) else "ok"),
+    ])
+    hora = pd.Timestamp(jv["hora"])
+    visual.fala(jv["texto"], f"RELATÓRIO DO DIA · {hora:%d/%m %H:%M} · "
+                + ("IA + PESQUISA NA WEB" if jv["fonte"] == "IA" else "MODO LOCAL (REGRAS)"))
+    b1, b2 = st.columns([1, 3])
+    if b1.button("🔁 Gerar novo relatório"):
+        with st.spinner("JARVIS analisando o mercado..."):
+            R["jarvis"] = jarvis.relatorio(R, pl)
+            with open(ULTIMO, "wb") as f:
+                pickle.dump(R, f)
+        st.cache_data.clear()
+        st.rerun()
+    if not jarvis.ia_disponivel():
+        b2.caption("Modo local: o JARVIS fala só a partir dos dados da apuração. Para ele pesquisar notícias na internet e "
+                   "conversar livremente, coloque sua chave da IA (ANTHROPIC_API_KEY) no config.env — veja o README.")
+
+    st.subheader("Converse com o JARVIS")
+    hist = st.session_state.setdefault("chat", [])
+    sug = st.columns(4)
+    for col, q in zip(sug, ["O que comprar este mês?", "Quando chego no milhão?", "Melhores pagadoras de dividendos", "É seguro?"]):
+        if col.button(q, width="stretch"):
+            st.session_state["pergunta_rapida"] = q
+    for m_ in hist:
+        with st.chat_message(m_["role"], avatar="🤖" if m_["role"] == "assistant" else "🧑"):
+            st.markdown(md(m_["content"]))
+    pergunta = st.chat_input("Pergunte ao JARVIS (ex.: TAEE11 vale a pena?)") or st.session_state.pop("pergunta_rapida", None)
+    if pergunta:
+        with st.spinner("JARVIS pensando..."):
+            resp, _fonte = jarvis.perguntar(pergunta, [{"role": x["role"], "content": x["content"]} for x in hist], R, pl)
+        hist += [{"role": "user", "content": pergunta}, {"role": "assistant", "content": resp}]
+        st.rerun()
+    if hist and st.button("🧹 Limpar conversa"):
+        st.session_state["chat"] = []
+        st.rerun()
+
+# ======================================================================= HOJE
+with abas[1]:
     st.subheader(f"Este mês, com {brl(pl['aporte_mensal'])} de aporte, compre:")
     compras, sobra = aporte.sugerir(rk, pl["aporte_mensal"], cart)
     if compras.empty:
@@ -122,11 +189,10 @@ with abas[0]:
         st.dataframe(tab.drop(columns=["Por que"]), hide_index=True, width="stretch",
                      column_config={"Conferir": st.column_config.LinkColumn("Conferir", display_text="Status Invest ↗")})
         with st.expander("📖 Por que cada uma foi escolhida", expanded=True):
-            st.markdown("\n".join(f"- **{r['Ação']}** — {r['Por que']}" for _, r in tab.iterrows()))
-        k = st.columns(3)
-        k[0].metric("Total a investir", brl(compras["valor"].sum()))
-        k[1].metric("Sobra (fica para o mês que vem)", brl(sobra))
-        k[2].metric("Renda extra por ano com esta compra", brl(compras["renda_anual_estimada"].sum()))
+            st.markdown(md("\n".join(f"- **{r['Ação']}** — {r['Por que']}" for _, r in tab.iterrows())))
+        visual.cartoes([("Total a investir", brl(compras["valor"].sum())),
+                        ("Sobra", brl(sobra), "fica para o mês que vem"),
+                        ("Renda extra por ano", brl(compras["renda_anual_estimada"].sum()), "com esta compra", "ok")])
         st.caption("Compre no **mercado fracionário** (código com F no final, ex.: TAEE11F) para comprar 1 cota de cada vez. "
                    "Antes de comprar, clique em *Status Invest ↗* e confira o preço e os proventos.")
 
@@ -134,10 +200,9 @@ with abas[0]:
     st.subheader(f"🎯 Sua meta: {brl(pl['meta'], 0)}")
     sim = meta.simular(pl["meta"], pat_hoje, pl["aporte_mensal"], cart_esp["retorno"], cart_esp["volatilidade"],
                        pl["aumento_aporte_aa"], mac["ipca_12m"] if pl["corrigir_inflacao"] else 0.0)
-    m = st.columns(3)
-    m[0].metric("Você tem hoje", brl(pat_hoje, 0))
-    m[1].metric("Chega lá em (metade das simulações)", meta.fmt_tempo(sim["meses_50"]))
-    m[2].metric("Com 90% de chance, até", meta.fmt_tempo(sim["meses_90"]))
+    visual.cartoes([("Você tem hoje", brl(pat_hoje, 0)),
+                    ("Chegada mais provável", meta.fmt_tempo(sim["meses_50"]), "metade das simulações"),
+                    ("Com 90% de chance, até", meta.fmt_tempo(sim["meses_90"]), "mesmo com anos ruins", "alerta")])
     rf = meta.meses_ate(pl["meta"], pat_hoje, pl["aporte_mensal"], mac["cdi_liquido"], pl["aumento_aporte_aa"],
                         mac["ipca_12m"] if pl["corrigir_inflacao"] else 0.0)
     if rf is not None and sim["meses_50"] is not None and rf <= sim["meses_50"]:
@@ -153,12 +218,12 @@ with abas[0]:
     if not imp:
         st.success("Nada urgente hoje.")
     for a in imp[:8]:
-        st.warning(f"**{a['tipo']}** — {a['texto']}")
+        st.warning(md(f"**{a['tipo']}** — {a['texto']}"))
     if len(imp) > 8:
         st.caption(f"+ {len(imp) - 8} alertas na aba 🔔 Alertas.")
 
 # ======================================================================= META
-with abas[1]:
+with abas[2]:
     st.subheader("🎯 Quanto tempo até a sua meta — e o que te leva mais rápido")
     st.caption("O sistema simula 5.000 futuros possíveis para a bolsa (anos bons e ruins, na proporção do passado) "
                "e mostra a CHANCE de você chegar até cada ano. Ninguém consegue prometer uma data exata.")
@@ -183,12 +248,11 @@ with abas[1]:
     infl = mac["ipca_12m"] if pl["corrigir_inflacao"] else 0.0
 
     sim = meta.simular(pl["meta"], pat_hoje, pl["aporte_mensal"], ret, vol, pl["aumento_aporte_aa"], infl)
-    st.markdown(f"**Patrimônio hoje: {brl(pat_hoje, 0)}** (carteira de ações da aba 💼 pelos preços de hoje + o que você tem fora da bolsa). "
-                f"Tempo até {brl(pl['meta'], 0)}:")
-    k = st.columns(3)
-    k[0].metric("🍀 Com anos bons", meta.fmt_tempo(sim["meses_10"]), help="Só 10% das simulações chegam antes disso.")
-    k[1].metric("🎯 Mais provável", meta.fmt_tempo(sim["meses_50"]), help="Metade das simulações chega até aqui.")
-    k[2].metric("🌧️ Com anos ruins", meta.fmt_tempo(sim["meses_90"]), help="9 em cada 10 simulações chegam até aqui.")
+    st.markdown(md(f"**Patrimônio hoje: {brl(pat_hoje, 0)}** (carteira de ações da aba 💼 pelos preços de hoje + o que você tem fora da bolsa). "
+                   f"Tempo até {brl(pl['meta'], 0)}:"))
+    visual.cartoes([("🍀 Com anos bons", meta.fmt_tempo(sim["meses_10"]), "só 10% chegam antes", "ok"),
+                    ("🎯 Mais provável", meta.fmt_tempo(sim["meses_50"]), "metade das simulações"),
+                    ("🌧️ Com anos ruins", meta.fmt_tempo(sim["meses_90"]), "9 em 10 chegam até aqui", "alerta")])
 
     f = sim["faixas"].copy()
     lim = min(40, max(10, int(((sim["meses_90"] or 480) / 12) + 3)))
@@ -197,7 +261,7 @@ with abas[1]:
     f["renda fixa"] = [pat_hoje * (1 + rf_ret) ** a + sum(pl["aporte_mensal"] * (1 + pl["aumento_aporte_aa"]) ** (mm // 12)
                        * (1 + rf_ret) ** ((a * 12 - mm - 1) / 12) for mm in range(a * 12)) for a in f["ano"]]
     base = alt.Chart(f).encode(x=alt.X("ano:Q", title="Anos a partir de hoje"))
-    faixa = base.mark_area(opacity=0.18, color="#4c78a8").encode(
+    faixa = base.mark_area(opacity=0.14, color=visual.CIANO).encode(
         y=alt.Y("pessimista:Q", title="Patrimônio (R$)", axis=alt.Axis(format="~s")), y2="otimista:Q")
     longo = f.melt(id_vars="ano", value_vars=["mediana", "renda fixa", "meta", "investido"], var_name="linha", value_name="valor")
     nomes_l = {"mediana": "Ações — mais provável", "renda fixa": f"Renda fixa líquida ({pct(rf_ret)} a.a.)",
@@ -206,7 +270,7 @@ with abas[1]:
     linhas = alt.Chart(longo).mark_line(strokeWidth=2.5).encode(
         x="ano:Q", y="valor:Q",
         color=alt.Color("linha:N", title=None, legend=alt.Legend(orient="bottom", labelLimit=300),
-                        scale=alt.Scale(domain=list(nomes_l.values()), range=["#1f77b4", "#ff7f0e", "#d62728", "#9d9d9d"])),
+                        scale=alt.Scale(domain=list(nomes_l.values()), range=[visual.CIANO, visual.AMBAR, visual.VERMELHO, visual.CINZA])),
         strokeDash=alt.condition(alt.datum.linha == "Meta", alt.value([6, 4]), alt.value([0])),
         tooltip=["ano", "linha", alt.Tooltip("valor:Q", format=",.0f")])
     st.altair_chart(faixa + linhas, width="stretch")
@@ -241,7 +305,7 @@ with abas[1]:
                  hide_index=True, width="stretch")
 
 # ======================================================================= RANKING
-with abas[2]:
+with abas[3]:
     st.caption("Todas as ações acompanhadas, da melhor para a pior para quem quer **renda + patrimônio no longo prazo**. "
                "Passe o mouse no título de cada coluna para ver o que significa.")
     f1, f2, f3 = st.columns([2, 2, 1])
@@ -290,7 +354,7 @@ with abas[2]:
         st.caption(f"Sem dados nesta apuração (código pode ter mudado na B3): {', '.join(R['sem_dados'])}")
 
 # ======================================================================= EMPRESA
-with abas[3]:
+with abas[4]:
     nomes = rk.set_index("ticker")["nome"]
     t = st.selectbox("Escolha a empresa", rk["ticker"], format_func=lambda x: f"{x} — {nomes[x]}")
     r = rk.set_index("ticker").loc[t]
@@ -298,11 +362,11 @@ with abas[3]:
     precos: pd.Series = R["precos"][t]
     prov: pd.Series = R["proventos"][t]
     st.subheader(f"{COR_SINAL.get(r['sinal'], '')} {t} — {r['nome']}")
-    st.markdown(f"**Veredito: {r['sinal'].upper()}** (nota {r['nota']:.0f}/100, {int(r['posicao'])}º de {len(rk)}). {r['por_que']}")
+    st.markdown(md(f"**Veredito: {r['sinal'].upper()}** (nota {r['nota']:.0f}/100, {int(r['posicao'])}º de {len(rk)}). {r['por_que']}"))
     links = [f"[Status Invest ↗]({r['conferir']})"] + ([f"[Site da empresa ↗]({info['website']})"] if info.get("website") else [])
     st.caption(f"{r['setor']} · cotação de {pd.Timestamp(r['data_cotacao']):%d/%m/%Y} · " + " · ".join(links))
     if r.get("avisos_dados"):
-        st.warning(f"**Confiança dos dados: {r['confianca']}** — {r['avisos_dados']}. Confira no Status Invest antes de comprar.")
+        st.warning(md(f"**Confiança dos dados: {r['confianca']}** — {r['avisos_dados']}. Confira no Status Invest antes de comprar."))
     m = st.columns(6)
     m[0].metric("Preço hoje", brl(r["preco"]), pct(r["var_dia"]) + " no dia" if r["var_dia"] == r["var_dia"] else None)
     m[1].metric("Preço-teto", brl(r["preco_teto_bazin"]),
@@ -322,7 +386,7 @@ with abas[3]:
         camadas = [alt.Chart(p5).mark_line().encode(x=alt.X("data:T", title=None, axis=alt.Axis(format="%m/%Y")), y=alt.Y("preco:Q", title="R$", scale=alt.Scale(zero=False)),
                                                       tooltip=[alt.Tooltip("data:T", format="%d/%m/%Y"), alt.Tooltip("preco:Q", format=".2f")])]
         if r["preco_teto_bazin"] == r["preco_teto_bazin"]:
-            camadas.append(alt.Chart(pd.DataFrame({"y": [r["preco_teto_bazin"]]})).mark_rule(color="green", strokeDash=[6, 4]).encode(y="y:Q"))
+            camadas.append(alt.Chart(pd.DataFrame({"y": [r["preco_teto_bazin"]]})).mark_rule(color=visual.VERDE, strokeDash=[6, 4]).encode(y="y:Q"))
         st.altair_chart(alt.layer(*camadas), width="stretch")
         st.caption("Linha verde: preço-teto. Abaixo dela = boa hora para comprar pensando em renda.")
     with g2:
@@ -345,11 +409,11 @@ with abas[3]:
                         "Cenário bom": brl(r.get(f"preco_{a}a_otimista"))} for a in (1, 3, 5)])
     p1, p2 = st.columns([3, 2])
     p1.dataframe(pv, hide_index=True, width="stretch")
-    p2.markdown(f"- Proventos esperados: **{pct(r.get('dy_previsto'))} ao ano**\n"
+    p2.markdown(md(f"- Proventos esperados: **{pct(r.get('dy_previsto'))} ao ano**\n"
                 f"- Valorização esperada: **{pct(r.get('tendencia_preco_aa'))} ao ano**\n"
                 f"- Retorno total esperado: **{pct(r.get('retorno_total_esperado_aa'))} ao ano**\n"
                 f"- Maior queda nos últimos 5 anos: {pct(r['queda_max_5a'])}\n"
-                f"- Analistas: preço-alvo {brl(r['alvo_analistas'])}" + (f" ({pct(r['potencial_analistas'])})" if r['potencial_analistas'] == r['potencial_analistas'] else ""))
+                f"- Analistas: preço-alvo {brl(r['alvo_analistas'])}" + (f" ({pct(r['potencial_analistas'])})" if r['potencial_analistas'] == r['potencial_analistas'] else "")))
     st.caption("80% de chance de o preço ficar entre o cenário ruim e o bom, segundo o comportamento passado da ação.")
 
     st.markdown("**📋 Saúde da empresa**")
@@ -386,7 +450,7 @@ with abas[3]:
                      hide_index=True, width="stretch")
 
 # ======================================================================= CARTEIRA
-with abas[4]:
+with abas[5]:
     st.markdown("**Minha carteira** — digite as ações que você já tem e clique em Salvar. "
                 "O aporte do mês passa a completar o que está abaixo do alvo, e os alertas acompanham as suas ações.")
     base_cart = cart if not cart.empty else pd.DataFrame({"ticker": pd.Series(dtype=str), "quantidade": pd.Series(dtype=float),
@@ -416,7 +480,7 @@ with abas[4]:
         st.caption("'Evitar' numa ação que você já tem não é ordem de venda: é um sinal para olhar as notícias e os resultados.")
 
 # ======================================================================= BACKTEST
-with abas[5]:
+with abas[6]:
     bt = R.get("backtest")
     st.subheader("🧪 E se você tivesse seguido o sistema nos últimos 5 anos?")
     if not bt:
@@ -437,7 +501,7 @@ with abas[5]:
         st.altair_chart(alt.Chart(s).mark_line(strokeWidth=2.5).encode(
             x=alt.X("data:T", title=None, axis=alt.Axis(format="%m/%Y")), y=alt.Y("valor:Q", title="R$", axis=alt.Axis(format="~s")),
             color=alt.Color("linha:N", title=None, legend=alt.Legend(orient="bottom"),
-                            scale=alt.Scale(domain=list(nomes_b.values()), range=["#2ca02c", "#ff7f0e", "#1f77b4", "#9d9d9d"])),
+                            scale=alt.Scale(domain=list(nomes_b.values()), range=[visual.CIANO, visual.AMBAR, "#B388FF", visual.CINZA])),
             tooltip=[alt.Tooltip("data:T", format="%m/%Y"), "linha", alt.Tooltip("valor:Q", format=",.0f")]), width="stretch")
         st.metric("Proventos que essa carteira pagou nos últimos 12 meses", brl(bt["proventos_12m"]))
         if not bt.get("cdi_real", True):
@@ -450,7 +514,7 @@ with abas[5]:
             st.dataframe(bt["compras"].iloc[::-1], hide_index=True, width="stretch")
 
 # ======================================================================= ALERTAS
-with abas[6]:
+with abas[7]:
     if not R["alertas"]:
         st.success("Nenhum alerta hoje.")
     icones = {"Oportunidade": "🟢", "Queda forte": "📉", "Provento": "💰", "Data-com": "📅", "Ranking": "🏆",
@@ -459,10 +523,10 @@ with abas[6]:
     escolha = st.multiselect("Tipos", tipos, default=tipos)
     for a in R["alertas"]:
         if a["tipo"] in escolha:
-            (st.warning if a["nivel"] == 1 else st.info)(f"{icones.get(a['tipo'], '•')} **{a['tipo']}** — {a['texto']}")
+            (st.warning if a["nivel"] == 1 else st.info)(md(f"{icones.get(a['tipo'], '•')} **{a['tipo']}** — {a['texto']}"))
 
 # ======================================================================= COMO FUNCIONA
-with abas[7]:
+with abas[8]:
     st.markdown("""
 ### De onde vêm os dados (todos reais e atualizados a cada apuração)
 - **Cotações, proventos (dividendos + JCP) e balanço**: Yahoo Finance. A data da última cotação aparece no topo.

@@ -8,7 +8,7 @@ from . import DADOS
 
 ARQ = DADOS / "plano.json"
 PADRAO = {"aporte_mensal": 1000.0, "meta": 1_000_000.0, "aumento_aporte_aa": 0.05,
-          "patrimonio_fora_bolsa": 0.0, "corrigir_inflacao": False}
+          "patrimonio_fora_bolsa": 0.0, "corrigir_inflacao": False, "nome": ""}
 
 
 def ler() -> dict:

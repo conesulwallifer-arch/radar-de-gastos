@@ -132,3 +132,42 @@ def test_confianca_detecta_dado_estranho():
     assert i["confianca"] == "Baixa" and i["sinal"] != "Comprar"
     ok = analise.ranking({"BOA3": ativo("BOA3")}, hoje=HOJE).iloc[0]
     assert ok["confianca"] == "Alta" and "pagou em 9" in ok["por_que"]
+
+
+# ---------------------------------------------------------------- JARVIS e vigia
+from acoes import jarvis, vigia  # noqa: E402
+
+
+def _R():
+    base = {f"B{n}A3": ativo(f"B{n}A3", preco=10 + n) for n in range(4)}
+    rk = analise.ranking(base, hoje=HOJE)
+    for c in ("dy_previsto", "retorno_total_esperado_aa", "volatilidade_aa", "proventos_previstos_12m"):
+        rk[c] = {"dy_previsto": 0.07, "retorno_total_esperado_aa": 0.11, "volatilidade_aa": 0.25, "proventos_previstos_12m": 0.8}[c]
+    rk["meses_provaveis"] = "mar, set"
+    return {"data": HOJE.date(), "demo": False, "ranking": rk, "alertas": [], "noticias": {}, "backtest": None,
+            "macro": {"selic": 0.14, "ipca_12m": 0.045, "cdi_liquido": 0.119, "estimado": False}}
+
+
+def test_jarvis_sem_ia_responde_com_dados(monkeypatch):
+    monkeypatch.setenv("JARVIS_SEM_IA", "1")
+    R = _R()
+    pl = {"aporte_mensal": 1000.0, "meta": 1_000_000.0, "aumento_aporte_aa": 0.05, "patrimonio_fora_bolsa": 0.0,
+          "corrigir_inflacao": False, "nome": "Tony"}
+    rel = jarvis.relatorio(R, pl)
+    assert rel["fonte"] == "regras" and "Tony" in rel["texto"] and "R$ 1.000.000" in rel["texto"]
+    resp, fonte = jarvis.perguntar("B1A3 vale a pena?", [], R, pl)
+    assert fonte == "regras" and "B1A3" in resp and "preço-teto" in resp
+    assert "anos" in jarvis.perguntar("quando chego no milhão?", [], R, pl)[0]
+
+
+def test_vigia_avisa_uma_vez_por_dia(tmp_path, monkeypatch):
+    monkeypatch.setattr(vigia, "ESTADO", tmp_path / "estado.json")
+    R = _R()
+    rk = R["ranking"]
+    t = rk.iloc[0]["ticker"]
+    rk.loc[rk["ticker"] == t, "preco_teto_bazin"] = float(rk.iloc[0]["preco"]) * 0.97  # estava acima do teto
+    rk.loc[rk["ticker"] == t, "nota"] = 80.0
+    fake = lambda ts: {t: float(rk.iloc[0]["preco"]) * 0.95}  # noqa: E731  cai 5%: abaixo do teto e queda forte
+    novos = vigia.checar(R, [], fake)
+    assert len(novos) == 2 and any("preço-teto" in n for n in novos) and any("cai 5,0%" in n for n in novos)
+    assert vigia.checar(R, [], fake) == []

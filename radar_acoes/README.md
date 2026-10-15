@@ -1,4 +1,4 @@
-# 📈 Radar de Ações — renda passiva de longo prazo
+# 🤖 J.A.R.V.I.S. · Radar de Ações — renda passiva e patrimônio de longo prazo
 
 Sistema que **apura todo dia** as ações da B3 que pagam bons proventos (dividendos e JCP), dá uma **nota de 0 a 100**,
 diz se é hora de **Comprar / Acumular / Aguardar / Evitar**, faz **previsões** (proventos dos próximos 12 meses,
@@ -8,6 +8,29 @@ e **te avisa** (Telegram e/ou e-mail) das melhores oportunidades e do que mudou.
 > ⚠️ Ferramenta educacional, **não é recomendação de investimento**. As previsões são estatísticas com base no passado.
 > Confira os dados no site de RI da empresa antes de investir.
 
+## 🤖 O agente JARVIS
+
+O painel tem a cara de um HUD do JARVIS (tema escuro, ciano, reator animado) e um assistente que trabalha por você:
+
+| O que ele faz | Quando |
+|---|---|
+| **Vigia o pregão**: confere as 15 melhores ações e as da sua carteira e avisa no Telegram/e-mail se uma ação boa cair abaixo do preço-teto ou despencar ≥ 4% | a cada 30 min, das 10h às 18h (dias úteis) |
+| **Apuração completa**: refaz notas, previsões, meta, teste no passado, notícias e escreve o **relatório do dia** | todo dia útil às 18h30 |
+| **Conversa** no painel (aba 🤖 JARVIS): "TAEE11 vale a pena?", "o que comprar este mês?", "quando chego no milhão?" | quando você quiser |
+
+**Dois modos:**
+- **Local (grátis, padrão)**: o JARVIS fala só a partir dos dados da apuração, com regras.
+- **Com IA (opcional)**: coloque `ANTHROPIC_API_KEY` no `config.env` (chave em console.anthropic.com). Aí o relatório é escrito pela IA Claude,
+  que também **pesquisa notícias na internet** sobre as ações do plano do mês e da sua carteira, e você conversa livremente.
+  Custo típico: alguns centavos de dólar por relatório ou pergunta.
+
+**Como ligar o agente:**
+- No computador: dois cliques em **`Iniciar JARVIS.bat`** e deixe a janela aberta (ou agende no Agendador de Tarefas para iniciar com o Windows).
+  Também dá para rodar uma vez: `python agente.py --agora` (apuração + relatório) ou `python agente.py --checar` (só vigilância).
+- Na nuvem (computador desligado): o GitHub Actions já roda a vigilância de hora em hora no pregão e a apuração às 18h30.
+  Cadastre os segredos `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` e, se quiser IA, `ANTHROPIC_API_KEY`; opcionalmente `CARTEIRA_CSV` e
+  `PLANO_JSON` (o conteúdo do seu `dados_acoes/plano.json`).
+
 ## Como instalar (Windows, Mac ou Linux, Python 3.10+)
 
 ```bash
@@ -16,7 +39,7 @@ pip install -r requirements.txt
 
 python apurar.py --demo --sem-envio   # teste rápido com dados FICTÍCIOS (sem internet)
 python apurar.py --aporte 1000        # apuração real + sugestão para um aporte de R$ 1.000
-streamlit run app.py                  # abre o painel no navegador
+python -m streamlit run app.py        # abre o painel no navegador (rode de dentro da pasta radar_acoes)
 ```
 
 No Windows, dê dois cliques em **`Apurar Acoes.bat`** (apuração) e **`Abrir Painel Acoes.bat`** (painel).
@@ -114,7 +137,8 @@ python -m pytest radar_acoes/tests -q
 ## Estrutura
 
 ```
-apurar.py            apuração diária: coleta → nota → notícias → previsões → alertas → envio
+agente.py            agente JARVIS: vigia o pregão e faz a apuração diária sozinho
+apurar.py            apuração diária: coleta → nota → notícias → previsões → alertas → relatório do JARVIS → envio
 app.py               painel (Streamlit)
 acoes/dados.py       Yahoo Finance com cache diário
 acoes/analise.py     indicadores, preço-teto, preço justo, nota e sinal
@@ -124,6 +148,9 @@ acoes/meta.py        simulação até a meta (Monte Carlo), alavancas, aporte ne
 acoes/backtest.py    teste no passado × CDI × Ibovespa
 acoes/macro.py       Selic, IPCA e CDI do Banco Central
 acoes/plano.py       seu plano (aporte, meta) salvo em dados_acoes/plano.json
+acoes/jarvis.py      relatório do dia e conversa (regras ou IA Claude com pesquisa na web)
+acoes/vigia.py       vigilância de preços durante o pregão
+acoes/visual.py      visual HUD do painel
 acoes/alertas.py     alertas do dia, Telegram e e-mail
 acoes/noticias.py    Google Notícias + tom e assunto
 acoes/demo.py        dados fictícios para testar sem internet

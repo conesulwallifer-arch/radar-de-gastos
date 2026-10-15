@@ -19,7 +19,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, DADOS, alertas, analise, aporte, backtest, dados, demo, macro, meta, noticias, plano, previsao, universo  # noqa: E402
+from acoes import AVISO, DADOS, alertas, analise, aporte, backtest, dados, demo, jarvis, macro, meta, noticias, plano, previsao, universo  # noqa: E402
 
 HIST = DADOS / "historico"
 REL = DADOS / "relatorios"
@@ -36,7 +36,7 @@ def anterior(hoje: date) -> pd.DataFrame | None:
 
 
 def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = False, com_noticias: bool = True,
-           enviar: bool = True, forcar: bool = False) -> dict:
+           enviar: bool = True, forcar: bool = False, usar_ia: bool = True) -> dict:
     hoje = date.today()
     HIST.mkdir(parents=True, exist_ok=True)
     REL.mkdir(parents=True, exist_ok=True)
@@ -107,13 +107,16 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
         texto = "⚠️ MODO DEMONSTRAÇÃO — DADOS FICTÍCIOS\n\n" + texto
 
     rk.drop(columns=["meses_pagamento", "proximos_meses"], errors="ignore").to_csv(HIST / f"ranking_{hoje:%Y-%m-%d}.csv", index=False)
-    (REL / f"relatorio_{hoje:%Y-%m-%d}.txt").write_text(texto, encoding="utf-8")
     resultado = {"data": hoje, "demo": usar_demo, "ranking": rk, "noticias": news, "alertas": alts,
                  "compras": compras, "sobra": sobra, "aporte": valor_aporte, "sem_dados": sem_dados,
                  "precos": {t: d["precos"] for t, d in base.items()},
                  "proventos": {t: d["proventos"] for t, d in base.items()},
                  "info": {t: d["info"] for t, d in base.items()},
                  "macro": mac, "backtest": bt, "carteira_esperada": cart_esp, "ibov": ibov}
+    print("🤖 JARVIS escrevendo o relatório do dia" + (" (IA + pesquisa na web)..." if usar_ia and jarvis.ia_disponivel() else "..."))
+    resultado["jarvis"] = jarvis.relatorio(resultado, pl, usar_ia=usar_ia)
+    texto = "🤖 J.A.R.V.I.S.\n\n" + resultado["jarvis"]["texto"].replace("**", "") + "\n\n" + "─" * 20 + "\n\n" + texto
+    (REL / f"relatorio_{hoje:%Y-%m-%d}.txt").write_text(texto, encoding="utf-8")
     with open(ULTIMO, "wb") as f:
         pickle.dump(resultado, f)
 
@@ -138,12 +141,13 @@ def main():
     ap.add_argument("--sem-noticias", action="store_true")
     ap.add_argument("--sem-envio", action="store_true", help="não envia Telegram/e-mail")
     ap.add_argument("--forcar", action="store_true", help="ignora o cache do dia e baixa de novo")
+    ap.add_argument("--sem-ia", action="store_true", help="JARVIS só por regras, mesmo com chave da IA")
     a = ap.parse_args()
     alertas.carregar_config()
     if not a.aporte:
         a.aporte = float(os.getenv("APORTE_MENSAL", "0") or 0)
     apurar([t.upper() for t in a.tickers] if a.tickers else universo.tickers(), a.aporte, a.demo,
-           not a.sem_noticias, not a.sem_envio, a.forcar)
+           not a.sem_noticias, not a.sem_envio, a.forcar, not a.sem_ia)
 
 
 if __name__ == "__main__":
