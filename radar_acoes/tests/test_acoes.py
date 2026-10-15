@@ -1,0 +1,84 @@
+"""Testes sem internet:  python -m pytest radar_acoes/tests -q"""
+import os
+import sys
+
+import numpy as np
+import pandas as pd
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from acoes import alertas, analise, aporte, demo, noticias, previsao  # noqa: E402
+
+HOJE = pd.Timestamp("2026-10-15")
+
+
+def ativo(ticker="TEST3", preco=10.0, div_anual=0.8, lpa=1.2, vpa=8.0, anos=10):
+    dias = pd.bdate_range(HOJE - pd.DateOffset(years=anos), HOJE)
+    precos = pd.Series(np.linspace(preco * 0.7, preco, len(dias)) * (1 + 0.01 * np.sin(np.arange(len(dias)))), index=dias)
+    precos.iloc[-1] = preco
+    datas = [pd.Timestamp(a, m, 15) for a in range(HOJE.year - anos + 1, HOJE.year + 1) for m in (3, 9)
+             if pd.Timestamp(a, m, 15) <= HOJE]
+    prov = pd.Series([div_anual / 2] * len(datas), index=pd.DatetimeIndex(datas))
+    info = {"longName": f"{ticker} SA", "currentPrice": preco, "trailingEps": lpa, "bookValue": vpa,
+            "returnOnEquity": lpa / vpa, "profitMargins": 0.18, "debtToEquity": 60}
+    return {"ticker": ticker, "info": info, "precos": precos, "proventos": prov}
+
+
+def test_indicadores_basicos():
+    i = analise.indicadores(ativo(), HOJE)
+    assert i["proventos_media_5a"] == pytest.approx(0.8)
+    assert i["dy_medio_5a"] == pytest.approx(0.08)
+    assert i["preco_teto_bazin"] == pytest.approx(0.8 / 0.06)
+    assert i["preco_justo_graham"] == pytest.approx((22.5 * 1.2 * 8.0) ** 0.5)
+    assert i["anos_pagou_10"] == 9  # 2017..2025 completos
+    assert i["meses_pagamento"] == [3, 9]
+
+
+def test_sinais():
+    boa = analise.ranking({"BOA3": ativo("BOA3")}, hoje=HOJE).iloc[0]
+    assert boa["sinal"] == "Comprar" and boa["nota"] >= 65
+    cara = analise.ranking({"CARA3": ativo("CARA3", preco=30)}, hoje=HOJE).iloc[0]
+    assert cara["sinal"] in ("Aguardar", "Evitar")
+    preju = analise.ranking({"PREJ3": ativo("PREJ3", lpa=-0.5)}, hoje=HOJE).iloc[0]
+    assert preju["sinal"] == "Evitar"
+    pouca = analise.ranking({"POUC3": ativo("POUC3", div_anual=0.2)}, hoje=HOJE).iloc[0]
+    assert pouca["sinal"] != "Comprar"  # DY 2% não serve para renda
+
+
+def test_previsao_e_simulador():
+    f = previsao.faixa_preco(100, 0.05, 0.3, 1)
+    assert f["pessimista"] < f["mediana"] < f["otimista"]
+    assert f["mediana"] == pytest.approx(105)
+    s = previsao.simular_aportes(1000, 2, dy=0, valorizacao=0)
+    assert s["patrimonio"].iloc[-1] == pytest.approx(24000)
+    s = previsao.simular_aportes(1000, 10, dy=0.08, valorizacao=0.03)
+    assert s["patrimonio"].iloc[-1] > s["investido"].iloc[-1]
+    assert previsao.meta_renda(10, 0.08, 0.0, 1000) == 2  # mês 1: R$ 1.000 rende 6,67; mês 2: ~R$ 2.007 rende 13,4
+
+
+def test_aporte_respeita_valor_e_setor():
+    base = {t: demo.gerar(t, HOJE.date()) for t in ["TAEE11", "EGIE3", "CMIG4", "BBSE3", "ITSA4", "SAPR11", "VIVT3"]}
+    base.update({f"B{n}A3": ativo(f"B{n}A3", preco=10 + n) for n in range(5)})
+    rk = analise.ranking(base, hoje=HOJE)
+    compras, sobra = aporte.sugerir(rk, 1000, pd.DataFrame(columns=["ticker", "quantidade"]), n_ativos=6, max_por_setor=2)
+    assert len(compras) > 0
+    assert compras["valor"].sum() + sobra == pytest.approx(1000, abs=0.01)
+    assert sobra >= 0
+    assert compras.groupby("setor").size().max() <= 2
+
+
+def test_noticias_classificacao():
+    assert noticias.classificar("Taesa anuncia dividendos e lucro sobe 20%")["tom"] == "positiva"
+    c = noticias.classificar("Empresa X corta dividendos após prejuízo")
+    assert c["tom"] == "negativa" and "Proventos" in c["assuntos"]
+
+
+def test_alerta_novo_provento_e_oportunidade():
+    rk = analise.ranking({"BOA3": ativo("BOA3")}, hoje=HOJE)
+    ant = rk.copy()
+    ant["ultimo_provento_data"] = "2026-03-15"
+    ant["sinal"] = "Aguardar"
+    rk["ultimo_provento_data"] = "2026-09-15"
+    tipos = {a["tipo"] for a in alertas.gerar(rk, ant, {}, hoje=HOJE.date())}
+    assert {"Provento", "Oportunidade"} <= tipos
