@@ -80,6 +80,11 @@ Sem chave da IA, ele roda por regras (quem mais melhorou/piorou, boas empresas e
 | Agenda de dividendos e gestão de carteira (Investidor10, Status Invest) | **Agenda de proventos**: quanto você deve receber em cada um dos próximos 12 meses e as próximas datas-com |
 | Ratings que se dizem "preditivos" | Aqui tudo tem **placar real**: teste no passado sem colar, previsões registradas e conferidas, agentes que perdem peso quando erram |
 
+## ⚙️ Configurar Telegram, IA e aporte (assistente)
+
+Dois cliques em **`Configurar AURUM.bat`** (ou `python configurar.py`). O assistente explica cada passo, descobre sozinho o
+seu chat do Telegram, manda uma mensagem de teste, confere a chave da IA sem gastar créditos e grava o `config.env`.
+
 ## Como instalar (Windows, Mac ou Linux, Python 3.10+)
 
 ```bash
