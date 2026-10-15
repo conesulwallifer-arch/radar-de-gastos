@@ -74,7 +74,10 @@ def contexto(R: dict, pl: dict | None = None, cart: pd.DataFrame | None = None) 
         "data_apuracao": str(R["data"]), "cotacoes_ate": str(datas.max()) if len(datas) else None, "demo": bool(R.get("demo")),
         "nome": pl.get("nome", ""), "n_empresas": len(rk),
         "macro": {"selic": mac["selic"], "ipca_12m": mac["ipca_12m"], "renda_fixa_liquida": mac["cdi_liquido"],
-                  "estimado": bool(mac.get("estimado"))},
+                  "estimado": bool(mac.get("estimado")), "expectativas_focus": mac.get("focus") or None,
+                  "leitura_juros": mac.get("leitura_juros")},
+        "proximos_balancos": sorted([(r["ticker"], r["proximo_balanco"]) for _, r in rk.head(20).iterrows()
+                                     if isinstance(r.get("proximo_balanco"), str)], key=lambda x: x[1])[:8],
         "plano": {"meta": pl["meta"], "aporte_mensal": pl["aporte_mensal"], "aumento_aporte_aa": pl["aumento_aporte_aa"],
                   "patrimonio_hoje": pat, "meta_corrigida_inflacao": bool(pl.get("corrigir_inflacao"))},
         "projecao": {"retorno_esperado_carteira": ce["retorno"], "oscilacao_carteira": ce["volatilidade"],
@@ -161,6 +164,10 @@ def relatorio_regras(c: dict) -> list[str]:
         linhas.append(texto_iris(c))
     if c.get("atlas_explorador"):
         linhas.append("🧭 Atlas, explorando por conta própria: " + c["atlas_explorador"].splitlines()[0])
+    if mac.get("leitura_juros"):
+        linhas.append("🔭 Um passo à frente: " + mac["leitura_juros"])
+    if c.get("proximos_balancos"):
+        linhas.append("🗓️ Balanços chegando: " + ", ".join(f"{t} ({pd.Timestamp(d):%d/%m})" for t, d in c["proximos_balancos"][:5]) + ".")
     if c["alertas_importantes"]:
         linhas.append(f"🔔 {len(c['alertas_importantes'])} alerta(s) importante(s). Principal: {c['alertas_importantes'][0]}")
     if c["dados_duvidosos"]:

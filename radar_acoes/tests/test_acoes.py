@@ -14,6 +14,14 @@ from acoes import alertas, analise, aporte, demo, noticias, previsao  # noqa: E4
 HOJE = pd.Timestamp("2026-10-15")
 
 
+@pytest.fixture(autouse=True)
+def _escritorio_isolado(tmp_path, monkeypatch):
+    """Os testes nunca escrevem no diário/status reais da equipe."""
+    from acoes import escritorio
+    monkeypatch.setattr(escritorio, "STATUS", tmp_path / "status.json")
+    monkeypatch.setattr(escritorio, "DIARIO", tmp_path / "diario.jsonl")
+
+
 def ativo(ticker="TEST3", preco=10.0, div_anual=0.8, lpa=1.2, vpa=8.0, anos=10):
     dias = pd.bdate_range(HOJE - pd.DateOffset(years=anos), HOJE)
     precos = pd.Series(np.linspace(preco * 0.7, preco, len(dias)) * (1 + 0.01 * np.sin(np.arange(len(dias)))), index=dias)
@@ -287,3 +295,59 @@ def test_atlas_regras_e_limites(tmp_path, monkeypatch):
     atlas.limpar_descobertas(["KEPL3"])
     assert atlas.ler_descobertas() == []
     assert atlas.explorar(R, None, "", usar_ia=False)["modo"] == "regras"
+
+
+# ---------------------------------------------------------------- escritório, agente 24h, antecipação
+from acoes import escritorio, macro  # noqa: E402
+
+
+def test_escritorio_status_e_diario():
+    escritorio.status(["renda", "risco"], "trabalhando", "analisando 57 empresas")
+    escritorio.registrar("renda", "analisou 57 empresas")
+    escritorio.SILENCIOSO = True
+    escritorio.registrar("renda", "não deve aparecer (teste)")
+    escritorio.SILENCIOSO = False
+    assert escritorio.ler_status()["risco"]["estado"] == "trabalhando"
+    d = escritorio.ler_diario()
+    assert len(d) == 1 and d[0]["agente"] == "renda" and escritorio.dias_trabalhados() == 1
+
+
+def test_agente_coloca_trabalho_em_dia():
+    from datetime import datetime
+    import agente
+    f = agente.FUSO
+    qui_manha = datetime(2026, 10, 15, 9, 0, tzinfo=f)
+    seg_manha = datetime(2026, 10, 19, 8, 0, tzinfo=f)
+    assert str(agente.ultimo_pregao_fechado(qui_manha)) == "2026-10-14"
+    assert str(agente.ultimo_pregao_fechado(seg_manha)) == "2026-10-16"  # pula o fim de semana
+    assert str(agente.ultimo_pregao_fechado(datetime(2026, 10, 15, 19, 0, tzinfo=f))) == "2026-10-15"
+
+
+def test_leitura_dos_juros_esperados():
+    from datetime import date
+    prox = f"selic_{date.today().year + 1}"
+    assert "caindo" in macro.leitura_juros(0.14, {prox: 0.11})
+    assert "subindo" in macro.leitura_juros(0.14, {prox: 0.16})
+    assert "estável" in macro.leitura_juros(0.14, {prox: 0.1405})
+    assert macro.leitura_juros(0.14, {}) is None
+
+
+def test_proximo_balanco_so_futuro():
+    d = ativo("BAL3")
+    d["info"]["earningsTimestamp"] = int(pd.Timestamp("2026-10-20").timestamp())
+    assert analise.indicadores(d, HOJE)["proximo_balanco"] == "2026-10-20"
+    d["info"]["earningsTimestamp"] = int(pd.Timestamp("2026-09-01").timestamp())
+    assert analise.indicadores(d, HOJE)["proximo_balanco"] is None
+
+
+def test_alertas_toleram_datas_ausentes():
+    """Empresa sem data-ex, sem balanço marcado e sem proventos não pode derrubar a apuração (célula vazia = NaN)."""
+    base = {"COM3": ativo("COM3"), "SEM3": ativo("SEM3")}
+    base["COM3"]["info"]["earningsTimestamp"] = int(pd.Timestamp("2026-10-18").timestamp())
+    base["COM3"]["info"]["exDividendDate"] = int(pd.Timestamp("2026-10-20").timestamp())
+    base["SEM3"]["proventos"] = pd.Series(dtype=float)
+    rk = analise.ranking(base, hoje=HOJE)
+    assert rk["proximo_balanco"].isna().any() and rk["ex_dividendo"].isna().any()
+    ant = rk.copy()
+    tipos = {a["tipo"] for a in alertas.gerar(rk, ant, {}, hoje=HOJE.date())}
+    assert "Balanço" in tipos and "Data-com" in tipos and "Provento" not in tipos

@@ -23,6 +23,11 @@ def carregar_config() -> None:
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
+def _texto(v) -> str | None:
+    """Datas vêm como texto ISO; célula vazia numa tabela vira NaN (que é 'verdadeiro' em Python) — trata como ausente."""
+    return v if isinstance(v, str) and v else None
+
+
 def _fmt_pct(x) -> str:
     return "—" if x is None or x != x else f"{x*100:+.1f}%".replace(".", ",")
 
@@ -66,16 +71,26 @@ def gerar(atual: pd.DataFrame, anterior: pd.DataFrame | None, noticias: dict[str
             add(1, "Queda forte", t, f"{t} caiu {_fmt_pct(r['var_dia'])} hoje. Boa empresa (nota {r['nota']:.0f}): "
                                      "veja as notícias — pode ser oportunidade ou problema.")
         # Novo provento anunciado
-        if a is not None and r.get("ultimo_provento_data") and r.get("ultimo_provento_data") != a.get("ultimo_provento_data"):
+        if a is not None and _texto(r.get("ultimo_provento_data")) and r.get("ultimo_provento_data") != a.get("ultimo_provento_data"):
             add(1, "Provento", t, f"{t} tem novo provento: {_fmt_r(r['ultimo_provento_valor'])} por ação (data-ex {r['ultimo_provento_data']}).")
         # Data-com chegando
-        ex = r.get("ex_dividendo")
+        ex = _texto(r.get("ex_dividendo"))
         if ex:
             try:
                 dex = date.fromisoformat(ex)
                 if hoje <= dex <= hoje + timedelta(days=10) and (r["nota"] >= 55 or t in carteira):
                     add(1, "Data-com", t, f"{t}: data-ex em {dex:%d/%m}. Para receber o provento, compre até o pregão anterior "
                                           f"({(dex - timedelta(days=1)):%d/%m}).")
+            except ValueError:
+                pass
+        # Balanço chegando (antecipação: resultado mexe com preço e com proventos)
+        pb = _texto(r.get("proximo_balanco"))
+        if pb and (r["posicao"] <= 15 or t in carteira):
+            try:
+                dpb = date.fromisoformat(pb)
+                if hoje <= dpb <= hoje + timedelta(days=7):
+                    add(2, "Balanço", t, f"{t} divulga resultado em {dpb:%d/%m}. A equipe vai reavaliar no dia seguinte; "
+                                         "evite decisões grandes antes do número sair.")
             except ValueError:
                 pass
         # Carteira

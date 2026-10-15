@@ -99,7 +99,26 @@ h2, h3 { font-size: .95rem !important; font-weight: 800 !important; text-transfo
 .ag-console { font-family: var(--mono); font-size:.82rem; line-height:1.6; color:#C9D1D9; background:#07080A;
   border:1px solid var(--borda); border-radius:4px; padding:10px 12px; max-height:340px; overflow:auto; }
 .ag-console .h { color: var(--ambar); margin-right:8px; }
-@media (prefers-reduced-motion: reduce) { .au-fita-trilho, .au-chip.on::before { animation: none !important; } }
+/* ---------- escritório ---------- */
+.of-sala { display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:10px; margin:6px 0 12px; }
+.of-mesa { border:1px solid var(--borda); border-radius:4px; background: var(--painel); padding:12px; position:relative; }
+.of-mesa.trabalhando { border-color: rgba(0,193,118,.55); box-shadow: 0 0 0 1px rgba(0,193,118,.15) inset; }
+.of-mesa.vigiando { border-color: rgba(77,163,255,.55); }
+.of-mesa.erro { border-color: rgba(255,77,79,.6); }
+.of-cab { display:flex; align-items:center; gap:10px; }
+.of-av { font-size:1.6rem; width:44px; height:44px; display:flex; align-items:center; justify-content:center; border-radius:4px;
+  background: var(--painel2); border:1px solid var(--borda); }
+.of-nome { font-weight:800; }
+.of-cargo { font-size:.8rem; color: var(--apagado); }
+.of-luz { position:absolute; top:10px; right:10px; font-family: var(--mono); font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; }
+.of-luz.trabalhando { color: var(--verde); } .of-luz.vigiando { color: var(--azul); } .of-luz.pausa { color: var(--apagado); }
+.of-luz.erro { color: var(--vermelho); }
+.of-luz.trabalhando::before, .of-luz.vigiando::before { content:"●"; margin-right:4px; animation: pisca 1.2s infinite; }
+.of-luz.pausa::before { content:"○"; margin-right:4px; }
+.of-tarefa { margin-top:10px; font-size:.86rem; line-height:1.4; color: var(--texto); min-height:2.6em; }
+.of-tarefa.trabalhando::after { content:"▍"; color: var(--verde); animation: pisca .9s infinite; margin-left:2px; }
+.of-hora { font-family: var(--mono); font-size:.72rem; color: var(--apagado); margin-top:6px; }
+@media (prefers-reduced-motion: reduce) { .au-fita-trilho, .au-chip.on::before, .of-luz::before, .of-tarefa::after { animation: none !important; } }
 @media (max-width: 640px) { .au-nome { font-size:1.4rem; letter-spacing:.2em; } .au-chips { justify-content:flex-start; } }
 </style>
 """
@@ -231,3 +250,18 @@ def floco(pcts: dict[str, float], graus: dict[str, str], tamanho: int = 300) -> 
            f'aria-label="Notas por fator comparadas ao setor">{aneis}{eixos}'
            f'<polygon points="{forma}" fill="{cor}" fill-opacity=".22" stroke="{cor}" stroke-width="2"/>{rotulos}</svg>')
     st.markdown(f'<div style="display:flex;justify-content:center">{svg}</div>', unsafe_allow_html=True)
+
+
+def escritorio(mesas: list[dict]) -> None:
+    """mesas: [{'icone','nome','cargo','estado','tarefa','desde'}] — a sala com cada agente na sua mesa."""
+    rot = {"trabalhando": "trabalhando", "vigiando": "vigiando", "pausa": "em pausa", "erro": "atenção"}
+    blocos = []
+    for m in mesas:
+        e = m.get("estado", "pausa")
+        blocos.append(
+            f'<div class="of-mesa {e}"><span class="of-luz {e}">{rot.get(e, e)}</span><div class="of-cab">'
+            f'<div class="of-av">{m["icone"]}</div><div><div class="of-nome">{html.escape(m["nome"])}</div>'
+            f'<div class="of-cargo">{html.escape(m["cargo"])}</div></div></div>'
+            f'<div class="of-tarefa {e}">{html.escape(m.get("tarefa") or "aguardando a primeira tarefa")}</div>'
+            f'<div class="of-hora">{html.escape(m.get("desde") or "")}</div></div>')
+    st.markdown(f'<div class="of-sala">{"".join(blocos)}</div>', unsafe_allow_html=True)

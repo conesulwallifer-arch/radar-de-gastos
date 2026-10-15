@@ -13,7 +13,8 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, agenda, aporte, atlas, aurum, memoria, mesa, meta, plano, universo, visual  # noqa: E402
+from acoes import AVISO, agenda, aporte, atlas, aurum, escritorio, memoria, mesa, meta, plano, universo, visual  # noqa: E402
+import segundo_plano  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
 
 st.set_page_config(page_title="AURUM · Inteligência de Investimentos", page_icon="🪙", layout="wide")
@@ -77,6 +78,15 @@ with st.sidebar:
         st.session_state["rodar_demo"] = False
     if st.button("🧪 Testar com dados fictícios", width="stretch"):
         st.session_state["rodar_demo"] = True
+    st.divider()
+    st.header("Equipe 24h")
+    _ok, _txt = segundo_plano.ligada()
+    st.markdown(("🟢 **Trabalhando em segundo plano**" if _ok else "⚪ **Parada**") + f"  \n<small>{_txt}</small>", unsafe_allow_html=True)
+    if not _ok and st.button("▶️ Ligar equipe 24h", width="stretch"):
+        st.success(segundo_plano.ligar())
+    if _ok and st.button("⏹️ Desligar equipe", width="stretch"):
+        st.info(segundo_plano.desligar())
+    st.caption("Ligada, a equipe trabalha mesmo com este painel fechado (com o computador ligado) e inicia junto com o Windows.")
     st.caption("O ideal é apurar todo dia útil depois das 18h (fechamento da B3). "
                "Agende o arquivo *Apurar Acoes.bat* no Windows ou use o GitHub Actions (veja o README).")
 
@@ -109,6 +119,8 @@ chips = [("PREGÃO ABERTO" if pregao else "PREGÃO FECHADO", "on" if pregao else
          (f"SELIC {pct(mac['selic'], 2)}", "alerta" if mac.get("estimado") else ""),
          (f"{len(rk)} EMPRESAS", ""),
          (f"IPCA {pct(mac['ipca_12m'], 1)}", ""),
+         *([(f"FOCUS: SELIC {datetime.now().year + 1} {pct((mac.get('focus') or {}).get(f'selic_{datetime.now().year + 1}'), 2)}", "")]
+           if (mac.get("focus") or {}).get(f"selic_{datetime.now().year + 1}") else []),
          ("8 AGENTES ATIVOS" if R.get("mesa") else "AGENTES AGUARDANDO", "" if R.get("mesa") else "alerta"),
          ("IA + PESQUISA WEB" if aurum.ia_disponivel() else "MODO LOCAL (SEM IA)", "" if aurum.ia_disponivel() else "alerta")]
 if R.get("demo"):
@@ -186,6 +198,29 @@ with abas[0]:
 
 # ======================================================================= SALA DOS AGENTES
 with abas[1]:
+    @st.fragment(run_every=20)
+    def _sala_ao_vivo():
+        """Atualiza sozinho a cada 20 s: dá para ver a equipe trabalhando enquanto o agente roda."""
+        ok_, txt_ = segundo_plano.ligada()
+        stt = escritorio.ler_status()
+        st.subheader("🏢 Escritório — a equipe agora")
+        st.caption(("🟢 Equipe ligada em segundo plano — " if ok_ else "⚪ Equipe parada (ligue em 'Equipe 24h' na barra lateral) — ")
+                   + txt_ + f" · {escritorio.dias_trabalhados()} dia(s) de trabalho registrados no diário.")
+        mesas = []
+        for aid, (nome_, ic, cargo) in escritorio.EQUIPE.items():
+            e = stt.get(aid, {})
+            desde = e.get("desde", "")
+            mesas.append({"icone": ic, "nome": nome_, "cargo": cargo, "estado": e.get("estado", "pausa"),
+                          "tarefa": e.get("tarefa", ""), "desde": f"desde {pd.Timestamp(desde):%d/%m %H:%M}" if desde else ""})
+        visual.escritorio(mesas)
+        di = escritorio.ler_diario(60)
+        if di:
+            nomes_ = {k: f"{v[1]} {v[0]}" for k, v in escritorio.EQUIPE.items()}
+            visual.console([f"{pd.Timestamp(d['quando']):%d/%m %H:%M}  {nomes_.get(d['agente'], d['agente'])}: {d['texto']}" for d in di])
+        else:
+            st.caption("O diário começa na primeira apuração com dados reais.")
+    _sala_ao_vivo()
+
     M = R.get("mesa")
     if not M:
         st.info("A equipe ainda não se reuniu nesta apuração. Clique em **🔄 Apurar agora**.")
@@ -221,7 +256,8 @@ with abas[1]:
                          "Com amostra suficiente, quem acerta mais ganha mais peso nas decisões e quem erra perde."))
         else:
             mem = pa.copy()
-            mem["Agente"] = mem["agente"].map(lambda a: f"{mesa.POR_ID[a].icone} {mesa.POR_ID[a].apelido}" if a in mesa.POR_ID else a)
+            mem["Agente"] = mem["agente"].map(lambda a: f"{mesa.POR_ID[a].icone} {mesa.POR_ID[a].apelido}" if a in mesa.POR_ID
+                                              else "🧠 EQUIPE (decisão final)" if a == "equipe" else a)
             mem["Peso aprendido"] = mem["agente"].map(lambda a: f"×{apr.get(a, 1.0):.2f}".replace(".", ","))
             st.dataframe(pd.DataFrame({
                 "Agente": mem["Agente"], "Votos conferidos": mem["conferidos"], "Acerto real": mem["acerto"].map(pct),
@@ -358,6 +394,38 @@ with abas[2]:
                         ("Renda extra por ano", brl(compras["renda_anual_estimada"].sum()), "com esta compra", "ok")])
         st.caption("Compre no **mercado fracionário** (código com F no final, ex.: TAEE11F) para comprar 1 cota de cada vez. "
                    "Antes de comprar, clique em *Status Invest ↗* e confira o preço e os proventos.")
+
+    st.divider()
+    st.subheader("🔭 Um passo à frente — o que vem por aí")
+    st.caption("Ninguém prevê o preço de amanhã. O que dá para antecipar é o que já está marcado para acontecer.")
+    if mac.get("leitura_juros"):
+        st.info(md("**Juros:** " + mac["leitura_juros"]))
+    hoje_ts = pd.Timestamp(R["data"])
+    carteira_ts = set(cart["ticker"]) if len(cart) else set()
+    if "proximo_balanco" in rk:
+        bal = rk[rk["proximo_balanco"].notna() & ((rk["posicao"] <= 20) | rk["ticker"].isin(carteira_ts))].copy()
+        bal["quando"] = pd.to_datetime(bal["proximo_balanco"])
+        bal = bal[(bal["quando"] >= hoje_ts) & (bal["quando"] <= hoje_ts + pd.Timedelta(days=21))].sort_values("quando")
+    else:
+        bal = pd.DataFrame()
+    dcs = agenda.proximas_datas_com(rk, 15, R["data"])
+    a1, a2 = st.columns(2)
+    with a1:
+        st.markdown("**🗓️ Balanços nas próximas 3 semanas**")
+        if len(bal):
+            st.dataframe(pd.DataFrame({"Ação": bal["ticker"], "Divulga em": bal["quando"].dt.strftime("%d/%m"),
+                                       "Sinal hoje": bal["sinal"].map(lambda x: f"{COR_SINAL.get(x, '')} {x}")}),
+                         hide_index=True, width="stretch")
+            st.caption("Resultado mexe com preço e com proventos: a equipe reavalia no dia seguinte.")
+        else:
+            st.caption("Nenhuma data de balanço informada pela fonte para as próximas 3 semanas.")
+    with a2:
+        st.markdown("**💰 Datas-com nos próximos 15 dias**")
+        if len(dcs):
+            st.dataframe(pd.DataFrame({"Ação": dcs["ticker"], "Data-ex": dcs["data_ex"].dt.strftime("%d/%m"),
+                                       "Compre até": dcs["comprar_ate"].dt.strftime("%d/%m")}), hide_index=True, width="stretch")
+        else:
+            st.caption("Nenhuma data-ex informada para os próximos 15 dias.")
 
     st.divider()
     st.subheader(f"🎯 Sua meta: {brl(pl['meta'], 0)}")
@@ -609,7 +677,7 @@ with abas[6]:
                 x=alt.X("ano:N", title=None), y=alt.Y("valor:Q", title="R$ por ação"),
                 tooltip=["ano", alt.Tooltip("valor:Q", format=".2f", title="R$ por ação")]), width="stretch")
             st.caption(f"Costuma pagar em: **{r.get('meses_provaveis', '—')}**. "
-                       f"Próxima data-ex informada: **{pd.Timestamp(r['ex_dividendo']):%d/%m/%Y}**." if r['ex_dividendo'] else "Próxima data-ex: não informada.")
+                       f"Próxima data-ex informada: **{pd.Timestamp(r['ex_dividendo']):%d/%m/%Y}**." if isinstance(r['ex_dividendo'], str) else "Próxima data-ex: não informada.")
 
     st.markdown("**🔮 Previsão (estatística, não é garantia)**")
     pv = pd.DataFrame([{"Daqui a": f"{a} ano{'s' if a > 1 else ''}",
@@ -642,8 +710,8 @@ with abas[6]:
              ("caixa negativo" if r.get("payout_fcl") == float("inf") else "—"), "abaixo de 100% = dividendo coberto"),
         ])
         with st.expander("Ver cada checagem"):
-            st.markdown("**Segurança dos dividendos**\n\n" + "\n".join(f"- {c}" for c in (r.get("seguranca_checks") or ["sem dados"])))
-            st.markdown("**Piotroski F-score**\n\n" + "\n".join(f"- {c}" for c in (r.get("f_detalhe") or ["sem balanços disponíveis"])))
+            st.markdown("**Segurança dos dividendos**\n\n" + "\n".join(f"- {c}" for c in (r.get("seguranca_checks") if isinstance(r.get("seguranca_checks"), list) else ["sem dados"])))
+            st.markdown("**Piotroski F-score**\n\n" + "\n".join(f"- {c}" for c in (r.get("f_detalhe") if isinstance(r.get("f_detalhe"), list) else ["sem balanços disponíveis"])))
             st.caption(f"Preço justo por Gordon: proventos médios × (1 + crescimento até 5%) ÷ (taxa exigida − crescimento); "
                        f"taxa exigida hoje = {pct(r.get('taxa_desconto'))}, que sobe quando a Selic sobe.")
 

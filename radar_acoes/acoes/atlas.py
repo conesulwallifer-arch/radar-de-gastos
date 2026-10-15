@@ -20,7 +20,7 @@ from datetime import date, datetime
 import numpy as np
 import pandas as pd
 
-from . import DADOS, ia
+from . import DADOS, escritorio, ia
 from .alertas import _fmt_r as brl
 
 NOTAS = DADOS / "atlas_notas.json"
@@ -278,8 +278,10 @@ def explorar_regras(R: dict, anterior: pd.DataFrame | None) -> dict:
 
 
 def explorar(R: dict, anterior: pd.DataFrame | None, contexto_resumo: str, usar_ia: bool = True) -> dict:
-    if usar_ia and not R.get("demo") and ia.disponivel():
-        r = explorar_ia(R, contexto_resumo)
-        if r:
-            return r
-    return explorar_regras(R, anterior)
+    escritorio.status("atlas", "trabalhando", "explorando o mercado por conta própria")
+    r = explorar_ia(R, contexto_resumo) if usar_ia and not R.get("demo") and ia.disponivel() else None
+    r = r or explorar_regras(R, anterior)
+    for passo in r["diario"]:
+        escritorio.registrar("atlas", passo)
+    escritorio.status("atlas", "pausa", "exploração do dia entregue")
+    return r

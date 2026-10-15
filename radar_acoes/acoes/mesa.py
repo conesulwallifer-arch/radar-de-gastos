@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from . import ia
+from . import escritorio, ia
 
 
 @dataclass
@@ -80,7 +80,7 @@ class Renda(Agente):
             o.argumentos.append("Atenção: os últimos 12 meses tiveram provento extraordinário, que pode não se repetir.")
         seg = r.get("seguranca_div")
         if _ok(seg):
-            falhas = [c[2:] for c in (r.get("seguranca_checks") or []) if c.startswith("❌")]
+            falhas = [c[2:] for c in (r.get("seguranca_checks") if isinstance(r.get("seguranca_checks"), list) else []) if c.startswith("❌")]
             if seg >= 80:
                 o.add(1, f"Dividendos seguros: {seg:.0f}/100 nas checagens de segurança.")
             elif seg <= 40:
@@ -444,6 +444,7 @@ def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previso
     log = []
     for ag in AGENTES:
         falar(f"{ag.icone} **{ag.apelido}** ({ag.nome}) está analisando {len(rk)} empresas...")
+        escritorio.status(ag.id, "trabalhando", f"analisando {len(rk)} empresas")
         t0 = time.perf_counter()
         pos = neg = vetos = 0
         for _, r in rk.iterrows():
@@ -458,6 +459,8 @@ def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previso
         log.append(f"{ag.icone} {ag.apelido} ({ag.nome}): analisou {len(rk)} empresas em {time.perf_counter() - t0:.2f}s — "
                    f"{pos} a favor, {neg} contra" + (f", {vetos} veto(s)" if vetos else "") + ".")
         falar("   ✓ " + log[-1])
+        escritorio.registrar(ag.id, log[-1].split(": ", 1)[-1])
+        escritorio.status(ag.id, "pausa", "análise do dia entregue")
 
     usou_ia = False
     if usar_ia and ia.disponivel():
@@ -465,14 +468,17 @@ def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previso
         cand = rk.set_index("ticker").loc[pre.sort_values("placar", ascending=False).head(n_ia)["ticker"]].reset_index()
         print(f"  🪙 Mesa com IA: revisando as {len(cand)} melhores candidatas (cada especialista é um agente Claude)...")
         falar(f"📰 **Nina** está pesquisando notícias na internet sobre {len(cand)} candidatas...")
+        escritorio.status("noticias", "trabalhando", "pesquisando notícias na internet")
         pesquisa = _pesquisar_noticias(cand)
         if pesquisa:
             log.append("📰 Nina (IA): pesquisou a internet sobre as candidatas.")
             falar("   ✓ " + log[-1])
+            escritorio.registrar("noticias", f"pesquisou na internet notícias de {len(cand)} candidatas")
         for ag in AGENTES:
             if ag.id == "previsor":
                 continue  # previsão é estatística; a IA não acrescenta aqui
             falar(f"{ag.icone} **{ag.apelido}** (IA) está revisando as {len(cand)} melhores candidatas...")
+            escritorio.status(ag.id, "trabalhando", f"revisando com IA as {len(cand)} melhores candidatas")
             votos = _revisao_ia(ag, cand, opinioes, ctx, pesquisa if ag.id in ("noticias", "risco") else None)
             for t, (v, arg) in votos.items():
                 op = opinioes[t][ag.id]
@@ -484,9 +490,17 @@ def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previso
                 usou_ia = True
                 log.append(f"{ag.icone} {ag.apelido} (IA): revisou {len(votos)} candidatas.")
                 falar("   ✓ " + log[-1])
+                escritorio.registrar(ag.id, f"revisou com IA as {len(votos)} melhores candidatas")
+            escritorio.status(ag.id, "pausa", "revisão com IA entregue")
 
     falar("🔍 **Verificação cruzada**: cada agente está conferindo o trabalho de um colega...")
+    escritorio.status([a.id for a in AGENTES], "trabalhando", "conferindo o trabalho de um colega")
     achados = verificacao_cruzada(rk, opinioes, ctx)
+    for quem in sorted({v["verificador"] for v in achados}):
+        n_ = sum(1 for v in achados if v["verificador"] == quem)
+        alvo = next(a.id for a in AGENTES if quem.endswith(a.apelido))
+        escritorio.registrar(alvo, f"conferiu o trabalho de colegas e fez {n_} contestação(ões)")
+    escritorio.status([a.id for a in AGENTES], "pausa", "reunião do dia encerrada")
     log.append(f"🔍 Verificação cruzada: {len(achados)} contestação(ões) entre os agentes "
                f"({sum(1 for a in achados if a['efeito'] != 'anotado')} votos corrigidos).")
     falar("   ✓ " + log[-1])

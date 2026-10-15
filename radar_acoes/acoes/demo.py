@@ -31,6 +31,7 @@ def gerar(ticker: str, hoje: date | None = None) -> dict:
         "trailingEps": lpa, "bookValue": vpa, "returnOnEquity": lpa / vpa, "profitMargins": rng.uniform(-0.05, 0.35),
         "debtToEquity": rng.uniform(10, 250), "earningsGrowth": rng.uniform(-0.3, 0.3),
         "exDividendDate": int(ex.timestamp()), "targetMeanPrice": preco * rng.uniform(0.85, 1.4),
+        "earningsTimestamp": int((hoje + pd.Timedelta(days=int(rng.integers(-20, 40)))).timestamp()),
         "recommendationKey": rng.choice(["buy", "hold", "strong_buy", "underperform"]),
         "longBusinessSummary": "Empresa fictícia gerada para demonstração do Radar de Ações.",
     }

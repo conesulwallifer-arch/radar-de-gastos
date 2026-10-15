@@ -4,10 +4,11 @@ on:
   schedule:
     - cron: "30 21 * * 1-5"    # dias úteis, 18h30 de Brasília: apuração completa + relatório do AURUM
     - cron: "15 13-20 * * 1-5" # dias úteis, de hora em hora das 10h15 às 17h15 de Brasília: vigilância do pregão
+    - cron: "0 13 * * 6"       # sábado, 10h de Brasília: reunião semanal
   workflow_dispatch:
     inputs:
       modo:
-        description: "agora = apuração completa; checar = só vigilância de preços"
+        description: "agora = apuração completa; checar = só vigilância de preços; semanal = reunião semanal"
         required: false
         default: "agora"
 
@@ -57,6 +58,8 @@ jobs:
         run: |
           if [ "${{ github.event.schedule }}" = "15 13-20 * * 1-5" ] || [ "${{ github.event.inputs.modo }}" = "checar" ]; then
             python agente.py --checar
+          elif [ "${{ github.event.schedule }}" = "0 13 * * 6" ] || [ "${{ github.event.inputs.modo }}" = "semanal" ]; then
+            python agente.py --semanal
           else
             python agente.py --agora
           fi

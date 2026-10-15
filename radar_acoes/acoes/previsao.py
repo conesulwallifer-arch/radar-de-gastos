@@ -25,7 +25,7 @@ def proventos_12m(i: dict, hoje: pd.Timestamp | None = None) -> dict:
     g = 0.0 if g is None or g != g else max(-0.10, min(0.10, g))
     previsto = base * (1 + g)
     preco = i.get("preco") or np.nan
-    meses = i.get("meses_pagamento") or []
+    meses = i.get("meses_pagamento") if isinstance(i.get("meses_pagamento"), list) else []
     nomes = "jan fev mar abr mai jun jul ago set out nov dez".split()
     return {
         "proventos_previstos_12m": previsto,

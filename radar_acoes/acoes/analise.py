@@ -117,6 +117,7 @@ def indicadores(d: dict, hoje: pd.Timestamp | None = None) -> dict:
         "potencial_analistas": alvo / preco - 1 if alvo == alvo and preco else np.nan,
         "recomendacao_analistas": info.get("recommendationKey"),
         "ex_dividendo": _data_ex(info.get("exDividendDate")),
+        "proximo_balanco": _proximo_balanco(info, hoje),
         "ultimo_provento_data": prov.index[-1].date().isoformat() if not prov.empty else None,
         "ultimo_provento_valor": float(prov.iloc[-1]) if not prov.empty else np.nan,
     }
@@ -127,6 +128,15 @@ def _data_ex(v):
         return pd.Timestamp(int(v), unit="s").date().isoformat() if v else None
     except (TypeError, ValueError):
         return None
+
+
+def _proximo_balanco(info: dict, hoje: pd.Timestamp) -> str | None:
+    """Próxima divulgação de resultado informada pelo Yahoo (só datas futuras)."""
+    for k in ("earningsTimestampStart", "earningsTimestamp", "earningsTimestampEnd"):
+        d = _data_ex(info.get(k))
+        if d and pd.Timestamp(d) >= hoje.normalize():
+            return d
+    return None
 
 
 PESOS = {"renda": 0.40, "qualidade": 0.30, "preco": 0.20, "risco": 0.10}

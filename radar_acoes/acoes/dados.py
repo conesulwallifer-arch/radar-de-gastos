@@ -18,7 +18,7 @@ CAMPOS_INFO = [
     "trailingPE", "forwardPE", "priceToBook", "trailingEps", "forwardEps", "bookValue",
     "returnOnEquity", "returnOnAssets", "profitMargins", "operatingMargins", "debtToEquity",
     "totalDebt", "totalCash", "ebitda", "payoutRatio", "earningsGrowth", "revenueGrowth",
-    "exDividendDate", "dividendRate", "beta", "recommendationKey", "targetMeanPrice", "numberOfAnalystOpinions",
+    "exDividendDate", "dividendRate", "beta", "earningsTimestamp", "earningsTimestampStart", "earningsTimestampEnd", "recommendationKey", "targetMeanPrice", "numberOfAnalystOpinions",
 ]
 
 

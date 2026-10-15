@@ -80,6 +80,33 @@ Sem chave da IA, ele roda por regras (quem mais melhorou/piorou, boas empresas e
 | Agenda de dividendos e gestão de carteira (Investidor10, Status Invest) | **Agenda de proventos**: quanto você deve receber em cada um dos próximos 12 meses e as próximas datas-com |
 | Ratings que se dizem "preditivos" | Aqui tudo tem **placar real**: teste no passado sem colar, previsões registradas e conferidas, agentes que perdem peso quando erram |
 
+## 🏢 A equipe trabalhando 24h (mesmo com o painel fechado)
+
+Clique em **▶️ Ligar equipe 24h** na barra lateral do painel (ou dois cliques em **`Ligar AURUM 24h.bat`**). A equipe passa a
+rodar escondida e **liga sozinha sempre que o Windows iniciar** — não precisa de administrador nem do painel aberto:
+
+| Quando | Quem | O quê |
+|---|---|---|
+| Ao ligar o computador | AURUM | Se perdeu alguma apuração, coloca o trabalho em dia na hora |
+| Dias úteis, 10h–18h, a cada 30 min | Rex e Téo | Vigiam os preços das melhores ações e da sua carteira; avisam no Telegram |
+| Dias úteis, 18h30 | Todos | Reunião completa: coleta, 7 especialistas, verificação cruzada, Atlas, memória, relatório |
+| Sábado, 10h | AURUM | Reunião semanal: o que mudou na semana, placar real da equipe, anotações do Atlas |
+
+Na aba **🧠 Sala dos Agentes**, o **Escritório** mostra cada um na sua mesa (trabalhando, vigiando ou em pausa, e o que está
+fazendo) e o **diário da equipe**, que acumula tudo o que fizeram, dia após dia — a tela se atualiza sozinha a cada 20 segundos.
+Para parar: **⏹️ Desligar equipe** (ou `Desligar AURUM 24h.bat`). Com o computador desligado, quem cobre é o GitHub Actions.
+
+**Melhorando a cada dia, com prova:** cada voto de cada agente — e a decisão final da equipe — é guardado e conferido 3 meses
+depois contra o que a ação fez de verdade (descontando o movimento da bolsa). Quem acerta ganha peso; o placar aparece no
+"Cérebro de cada agente" e na reunião semanal.
+
+## 🔭 Um passo à frente
+
+Ninguém prevê o preço de amanhã; o que dá para antecipar é o que **já está marcado para acontecer**:
+- **Juros**: o Boletim Focus do Banco Central (o que o mercado espera para a Selic e o IPCA). Se espera queda de juros,
+  boas pagadoras de dividendos costumam se valorizar — o AURUM avisa antes.
+- **Balanços** das próximas 3 semanas (alerta 7 dias antes para o top 15 e sua carteira) e **datas-com** dos próximos 15 dias.
+
 ## ⚙️ Configurar Telegram, IA e aporte (assistente)
 
 Dois cliques em **`Configurar AURUM.bat`** (ou `python configurar.py`). O assistente explica cada passo, descobre sozinho o

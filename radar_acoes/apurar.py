@@ -19,7 +19,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, dados, demo, aurum, macro, memoria, mesa, meta, noticias, plano, previsao, previsor, universo  # noqa: E402
+from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, escritorio, dados, demo, aurum, macro, memoria, mesa, meta, noticias, plano, previsao, previsor, universo  # noqa: E402
 
 HIST = DADOS / "historico"
 REL = DADOS / "relatorios"
@@ -38,6 +38,8 @@ def anterior(hoje: date) -> pd.DataFrame | None:
 def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = False, com_noticias: bool = True,
            enviar: bool = True, forcar: bool = False, usar_ia: bool = True, progresso=None) -> dict:
     falar = progresso or (lambda m: None)
+    escritorio.SILENCIOSO = usar_demo
+    escritorio.status("aurum", "trabalhando", "coordenando a apuração do dia")
     hoje = date.today()
     HIST.mkdir(parents=True, exist_ok=True)
     REL.mkdir(parents=True, exist_ok=True)
@@ -81,6 +83,10 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     print("5/5 Juros (Banco Central), teste no passado, meta e alertas...")
     falar("🏦 Consultando Selic e inflação no Banco Central e refazendo o teste dos últimos 5 anos...")
     mac = macro.indicadores()
+    mac["focus"] = macro.expectativas()
+    mac["leitura_juros"] = macro.leitura_juros(mac["selic"], mac["focus"])
+    if mac["leitura_juros"]:
+        escritorio.registrar("risco", "leu o Boletim Focus: " + mac["leitura_juros"].split(". ")[0])
     ibov = demo.gerar("BOVA11")["precos"] if usar_demo else (dados.coletar("BOVA11", forcar=forcar) or {}).get("precos")
     cdi, cdi_real = macro.cdi_mensal(date(hoje.year - 6, 1, 1))
     try:
@@ -126,7 +132,11 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
                            progresso=falar, aprendizado=aprendizado, cerebro=cerebro)
     reuniao["cerebro"] = cerebro
     if not usar_demo:  # dados fictícios nunca entram na memória dos agentes
-        memoria.registrar(reuniao["opinioes"], dict(zip(rk["ticker"], rk["preco"])), hoje)
+        # a decisão da EQUIPE também vai para a memória: é assim que se mede se o time está acertando
+        nota_eq = {"Compra forte": 2, "Compra": 1, "Neutro": 0, "Evitar": -1, "Vetado": -2}
+        cons_eq = reuniao["consenso"].set_index("ticker")["consenso"]
+        votos_mem = {t: {**ops, "equipe": {"voto": nota_eq.get(cons_eq.get(t), 0)}} for t, ops in reuniao["opinioes"].items()}
+        memoria.registrar(votos_mem, dict(zip(rk["ticker"], rk["preco"])), hoje)
     rk = rk.merge(reuniao["consenso"], on="ticker", how="left")
     for linha in reuniao["log"]:
         print("   " + linha)
@@ -176,7 +186,11 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
         falar("   🧭 Atlas " + passo)
     resultado["alertas"] = sorted(alts + resultado["atlas"]["alertas"], key=lambda a: (a["nivel"], a["ticker"]))
     falar("🪙 **AURUM** está escrevendo o relatório do dia...")
+    escritorio.status("aurum", "trabalhando", "escrevendo o relatório do dia")
     resultado["aurum"] = aurum.relatorio(resultado, pl, usar_ia=usar_ia)
+    escritorio.registrar("aurum", f"apuração concluída: {len(rk)} empresas, {sum(a['nivel'] == 1 for a in resultado['alertas'])} "
+                                  f"alertas importantes; {mesa.resumo_texto(reuniao)}")
+    escritorio.status("aurum", "pausa", "relatório do dia entregue")
     texto = "🪙 AURUM\n\n" + resultado["aurum"]["texto"].replace("**", "") + "\n\n" + "─" * 20 + "\n\n" + texto
     texto = texto.replace("─" * 20, "🧭 Atlas, o explorador:\n" + resultado["atlas"]["relatorio"].replace("**", "") + "\n\n" + "─" * 20, 1)
     (REL / f"relatorio_{hoje:%Y-%m-%d}.txt").write_text(texto, encoding="utf-8")
