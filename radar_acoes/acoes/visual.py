@@ -505,3 +505,33 @@ def sala_ilustrada(mesas: list[dict], pregao: bool, hora: int) -> None:
     st.markdown(_uma_linha(CSS_SALA) + f'<div class="sa-parede">{_uma_linha(_parede(pregao, hora))}</div>'
                 f'<div class="sa-chao">{"".join(baias)}</div>',
                 unsafe_allow_html=True)
+
+
+def sala_3d(mesas: list[dict], pregao: bool, hora: int, fita_itens: list[tuple], altura: int = 620) -> None:
+    """Sala dos Agentes em 3D (Three.js, servido localmente por /app/static). Gira sozinha; arraste para olhar em volta."""
+    import json
+    import streamlit.components.v1 as components
+    dados = {
+        "pregao": bool(pregao), "hora": int(hora),
+        "fita": [[t, round(float(p), 2), round(float(v), 4) if v == v else 0.0] for t, p, v in fita_itens[:16]],
+        "agentes": [{"id": m["id"], "nome": m["nome"], "cargo": m["cargo"], "estado": m.get("estado", "pausa"),
+                     "aparencia": APARENCIA.get(m["id"], APARENCIA["aurum"])} for m in mesas],
+    }
+    pagina = f"""
+<div id="sala3d" style="width:100%;height:{altura}px;position:relative;border:1px solid #262A33;border-radius:6px;overflow:hidden;background:#0A0B0D">
+  <div id="sala3d-carregando" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+       color:#8B919C;font:600 14px 'IBM Plex Mono',monospace;text-align:center;padding:20px">Montando a sala em 3D…</div>
+  <div style="position:absolute;left:10px;bottom:8px;color:#8B919C;font:500 12px Inter,Arial,sans-serif;pointer-events:none">
+    arraste para girar · role para aproximar</div>
+</div>
+<script>window.SALA_DADOS = {json.dumps(dados, ensure_ascii=False)};</script>
+<script type="importmap">{{"imports": {{"three": "/app/static/three.module.min.js", "three/addons/": "/app/static/"}}}}</script>
+<script type="module" src="/app/static/sala3d.js"></script>
+<script>
+  setTimeout(function () {{
+    var c = document.getElementById('sala3d-carregando');
+    if (c) c.textContent = 'Não foi possível abrir a sala em 3D aqui. Abra o painel pelo "Abrir Painel Acoes.bat" ' +
+                           '(de dentro da pasta radar_acoes) ou use a visão 2D.';
+  }}, 9000);
+</script>"""
+    components.html(pagina, height=altura + 4)

@@ -361,3 +361,21 @@ def test_sala_ilustrada_desenha_todos_os_agentes():
             assert svg.startswith("<svg") and svg.endswith("</svg>")
             assert "\n" not in svg and "$" not in svg  # o Streamlit não pode quebrar o desenho
             assert visual.EQUIPE_NOME[aid].upper() in svg  # plaquinha com o nome na mesa
+
+
+def test_sala_3d_tem_arquivos_e_dados(monkeypatch):
+    from pathlib import Path
+    from acoes import visual
+    raiz = Path(__file__).resolve().parent.parent
+    for arq in ("static/three.module.min.js", "static/OrbitControls.js", "static/sala3d.js", "static/LICENSE-three.txt"):
+        assert (raiz / arq).exists(), arq
+    assert "enableStaticServing = true" in (raiz / ".streamlit/config.toml").read_text()
+    capturado = {}
+    import streamlit.components.v1 as comp
+    monkeypatch.setattr(comp, "html", lambda html, height: capturado.update(html=html, altura=height))
+    mesas = [{"id": a, "nome": n, "cargo": c, "estado": "trabalhando"} for a, (n, _, c) in escritorio.EQUIPE.items()]
+    visual.sala_3d(mesas, True, 14, [("TAEE11", 34.5, 0.012), ("VALE3", 60.0, float("nan"))])
+    h = capturado["html"]
+    assert '"three": "/app/static/three.module.min.js"' in h and "/app/static/sala3d.js" in h
+    dados = json.loads(h.split("window.SALA_DADOS = ")[1].split(";</script>")[0])
+    assert len(dados["agentes"]) == 9 and dados["pregao"] is True and dados["fita"][1][2] == 0.0  # NaN vira 0

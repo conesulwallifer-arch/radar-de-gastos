@@ -92,7 +92,11 @@ rodar escondida e **liga sozinha sempre que o Windows iniciar** — não precisa
 | Dias úteis, 18h30 | Todos | Reunião completa: coleta, 7 especialistas, verificação cruzada, Atlas, memória, relatório |
 | Sábado, 10h | AURUM | Reunião semanal: o que mudou na semana, placar real da equipe, anotações do Atlas |
 
-Na aba **🧠 Sala dos Agentes**, o **Escritório** mostra cada um na sua mesa (trabalhando, vigiando ou em pausa, e o que está
+Na aba **🧠 Sala dos Agentes**, o **Escritório em 3D** (Three.js, roda no seu computador, sem internet) mostra a sala com
+cada agente como um boneco 3D na sua mesa: digitando quando trabalha, olhando em volta e mexendo o mouse quando vigia,
+recostado tomando café na pausa; o monitor de cada um mostra a sua função, e o telão da parede tem a fita de cotações.
+A câmera gira sozinha — arraste para olhar de qualquer ângulo e role para aproximar. Há também a visão **2D** (botão 3D/2D).
+O escritório mostra cada um na sua mesa (trabalhando, vigiando ou em pausa, e o que está
 fazendo) e o **diário da equipe**, que acumula tudo o que fizeram, dia após dia — a tela se atualiza sozinha a cada 20 segundos.
 Para parar: **⏹️ Desligar equipe** (ou `Desligar AURUM 24h.bat`). Com o computador desligado, quem cobre é o GitHub Actions.
 
@@ -231,7 +235,8 @@ acoes/macro.py       Selic, IPCA e CDI do Banco Central
 acoes/plano.py       seu plano (aporte, meta) salvo em dados_acoes/plano.json
 acoes/aurum.py      relatório do dia e conversa (regras ou IA Claude com pesquisa na web)
 acoes/vigia.py       vigilância de preços durante o pregão
-acoes/visual.py      visual de terminal de mercado do painel
+acoes/visual.py      visual de terminal de mercado do painel e a sala dos agentes (2D)
+static/sala3d.js     a sala dos agentes em 3D (Three.js incluído em static/, licença MIT)
 acoes/mesa.py        os 7 agentes, verificação cruzada e consenso (regras + IA)
 acoes/previsor.py    Íris: chance de alta/queda em 1 mês, teste sem colar e placar real
 acoes/memoria.py     cérebro dos agentes: memória de votos e pesos aprendidos
