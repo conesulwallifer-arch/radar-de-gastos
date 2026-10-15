@@ -1,4 +1,4 @@
-"""Mesa de analistas: sete agentes especialistas analisam cada ação, votam e o JARVIS consolida o consenso.
+"""Mesa de analistas: sete agentes especialistas analisam cada ação, votam e o AURUM consolida o consenso.
 
 Cada agente olha a ação por um ângulo e devolve um voto de -2 (fortemente contra) a +2 (fortemente a favor),
 com os argumentos. O Gestor de Risco pode VETAR (ex.: prejuízo, dado duvidoso, notícia grave).
@@ -463,7 +463,7 @@ def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previso
     if usar_ia and ia.disponivel():
         pre = _consenso(rk, opinioes)
         cand = rk.set_index("ticker").loc[pre.sort_values("placar", ascending=False).head(n_ia)["ticker"]].reset_index()
-        print(f"  🤖 Mesa com IA: revisando as {len(cand)} melhores candidatas (cada especialista é um agente Claude)...")
+        print(f"  🪙 Mesa com IA: revisando as {len(cand)} melhores candidatas (cada especialista é um agente Claude)...")
         falar(f"📰 **Nina** está pesquisando notícias na internet sobre {len(cand)} candidatas...")
         pesquisa = _pesquisar_noticias(cand)
         if pesquisa:
@@ -479,7 +479,7 @@ def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previso
                 op["voto_regras"] = op["voto"]
                 # meio-termo entre regras e IA; empate arredonda na direção da IA
                 op["voto"] = int(op["voto"] + np.sign(v - op["voto"]) * int(np.ceil(abs(v - op["voto"]) / 2)))
-                op["argumentos"].append(f"🤖 IA: {arg}")
+                op["argumentos"].append(f"🪙 IA: {arg}")
             if votos:
                 usou_ia = True
                 log.append(f"{ag.icone} {ag.apelido} (IA): revisou {len(votos)} candidatas.")
@@ -494,7 +494,7 @@ def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previso
     if aprendizado:
         falar("🧠 Pesos ajustados pelo placar real: " + ", ".join(f"{POR_ID[a].apelido} ×{f:.2f}".replace(".", ",")
                                                                for a, f in aprendizado.items() if a in POR_ID))
-    falar(f"🤖 **JARVIS** consolidou os votos: {resumo_texto({'consenso': cons})}.")
+    falar(f"🪙 **AURUM** consolidou os votos: {resumo_texto({'consenso': cons})}.")
     return {"consenso": cons, "opinioes": opinioes, "log": log, "ia": usou_ia, "fator_previsor": fator_previsor,
             "verificacoes": achados, "aprendizado": aprendizado,
             "hora": time.strftime("%Y-%m-%dT%H:%M")}

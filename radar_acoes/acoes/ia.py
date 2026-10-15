@@ -1,14 +1,14 @@
-"""Acesso à IA (Claude) compartilhado pelo JARVIS e pela mesa de analistas. Opcional: sem chave, nada aqui é chamado."""
+"""Acesso à IA (Claude) compartilhado pelo AURUM e pela mesa de analistas. Opcional: sem chave, nada aqui é chamado."""
 from __future__ import annotations
 
 import json
 import os
 
-MODELO = os.getenv("JARVIS_MODELO", "claude-opus-5-5")
+MODELO = os.getenv("AURUM_MODELO") or os.getenv("JARVIS_MODELO") or "claude-opus-5-5"  # JARVIS_*: nome antigo, ainda aceito
 
 
 def disponivel() -> bool:
-    if os.getenv("JARVIS_SEM_IA"):
+    if os.getenv("AURUM_SEM_IA") or os.getenv("JARVIS_SEM_IA"):
         return False
     try:
         import anthropic  # noqa: F401

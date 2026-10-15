@@ -1,8 +1,8 @@
-name: Radar de Ações — agente JARVIS
+name: Radar de Ações — agente AURUM
 
 on:
   schedule:
-    - cron: "30 21 * * 1-5"    # dias úteis, 18h30 de Brasília: apuração completa + relatório do JARVIS
+    - cron: "30 21 * * 1-5"    # dias úteis, 18h30 de Brasília: apuração completa + relatório do AURUM
     - cron: "15 13-20 * * 1-5" # dias úteis, de hora em hora das 10h15 às 17h15 de Brasília: vigilância do pregão
   workflow_dispatch:
     inputs:
@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  jarvis:
+  aurum:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     defaults:
@@ -44,7 +44,7 @@ jobs:
           mkdir -p dados_acoes
           if [ -n "$CARTEIRA_CSV" ]; then printf '%s\n' "$CARTEIRA_CSV" > dados_acoes/carteira.csv; fi
           if [ -n "$PLANO_JSON" ]; then printf '%s\n' "$PLANO_JSON" > dados_acoes/plano.json; fi
-      - name: JARVIS trabalhando
+      - name: AURUM trabalhando
         env:
           TZ: America/Sao_Paulo
           APORTE_MENSAL: ${{ vars.APORTE_MENSAL }}
@@ -63,7 +63,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: relatorio-jarvis
+          name: relatorio-aurum
           path: radar_acoes/dados_acoes/relatorios/
           if-no-files-found: ignore
           retention-days: 30

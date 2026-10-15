@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import pickle
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import altair as alt
 import pandas as pd
@@ -11,10 +13,10 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, agenda, aporte, atlas, jarvis, memoria, mesa, meta, plano, universo, visual  # noqa: E402
+from acoes import AVISO, agenda, aporte, atlas, aurum, memoria, mesa, meta, plano, universo, visual  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
 
-st.set_page_config(page_title="J.A.R.V.I.S. · Radar de Ações", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="AURUM · Inteligência de Investimentos", page_icon="🪙", layout="wide")
 visual.aplicar()
 
 COR_SINAL = {"Comprar": "🟢", "Acumular": "🟡", "Aguardar": "🟠", "Evitar": "🔴"}
@@ -55,7 +57,7 @@ def carregar(_marca: float) -> dict | None:
 
 def rodar(demo: bool):
     """Roda a apuração mostrando, ao vivo, cada etapa e cada agente trabalhando."""
-    with st.status("🤖 JARVIS convocou a equipe. Acompanhe o trabalho ao vivo...", expanded=True) as caixa:
+    with st.status("🪙 AURUM convocou a equipe. Acompanhe o trabalho ao vivo...", expanded=True) as caixa:
         apurar(universo.tickers(), plano.ler()["aporte_mensal"], usar_demo=demo, enviar=False,
                progresso=lambda m: caixa.write(md(m)))
         caixa.update(label="✅ Apuração concluída — equipe dispensada.", state="complete")
@@ -67,7 +69,7 @@ def rodar(demo: bool):
 pl = plano.ler()
 with st.sidebar:
     st.header("Comando")
-    nome = st.text_input("Como o JARVIS deve te chamar?", pl.get("nome", ""), placeholder="ex.: Tony")
+    nome = st.text_input("Como o AURUM deve te chamar?", pl.get("nome", ""), placeholder="ex.: Ana")
     if nome != pl.get("nome", ""):
         pl["nome"] = nome.strip()
         plano.salvar(pl)
@@ -83,7 +85,7 @@ if "rodar_demo" in st.session_state:  # roda na área principal, para ver a equi
 
 R = carregar(ULTIMO.stat().st_mtime if ULTIMO.exists() else 0)
 if R is None:
-    visual.topo("Radar de Ações · inteligência para renda e patrimônio", [("AGUARDANDO PRIMEIRA APURAÇÃO", "alerta")])
+    visual.topo("Inteligência de investimentos para renda e patrimônio", [("AGUARDANDO PRIMEIRA APURAÇÃO", "alerta")])
     st.info("Ainda não há apuração. Clique em **🔄 Apurar agora** na barra lateral (precisa de internet).")
     st.stop()
 
@@ -100,15 +102,24 @@ fresco = (f"📅 Apuração de **{R['data']:%d/%m/%Y}** · cotações até **{ul
           if ult_cot is not None else f"📅 Apuração de **{R['data']:%d/%m/%Y}** · ")
 fresco += (f"Selic **{pct(mac['selic'], 2)}**, IPCA 12m **{pct(mac['ipca_12m'], 2)}** "
            + ("(⚠️ estimados: Banco Central fora do ar)" if mac.get("estimado") else "(Banco Central)"))
-chips = [("ONLINE", "on"),
+agora_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
+pregao = agora_br.weekday() < 5 and (10, 0) <= (agora_br.hour, agora_br.minute) < (17, 55)
+chips = [("PREGÃO ABERTO" if pregao else "PREGÃO FECHADO", "on" if pregao else ""),
          (f"COTAÇÕES {ult_cot:%d/%m/%Y}" if ult_cot is not None else "SEM COTAÇÕES", "alerta" if atraso > 3 else ""),
          (f"SELIC {pct(mac['selic'], 2)}", "alerta" if mac.get("estimado") else ""),
          (f"{len(rk)} EMPRESAS", ""),
-         ("7 AGENTES ATIVOS" if R.get("mesa") else "AGENTES AGUARDANDO", "on" if R.get("mesa") else "alerta"),
-         ("IA + PESQUISA WEB" if jarvis.ia_disponivel() else "MODO LOCAL (SEM IA)", "" if jarvis.ia_disponivel() else "alerta")]
+         (f"IPCA {pct(mac['ipca_12m'], 1)}", ""),
+         ("8 AGENTES ATIVOS" if R.get("mesa") else "AGENTES AGUARDANDO", "" if R.get("mesa") else "alerta"),
+         ("IA + PESQUISA WEB" if aurum.ia_disponivel() else "MODO LOCAL (SEM IA)", "" if aurum.ia_disponivel() else "alerta")]
 if R.get("demo"):
     chips.insert(1, ("DADOS FICTÍCIOS", "perigo"))
-visual.topo(f"{jarvis.saudacao(pl.get('nome', ''))}. Radar de Ações · inteligência para renda e patrimônio", chips)
+visual.topo(f"{aurum.saudacao(pl.get('nome', ''))} · inteligência de investimentos para renda e patrimônio", chips)
+fita_itens = []
+ibov = R.get("ibov")
+if ibov is not None and len(ibov) > 1:
+    fita_itens.append(("IBOV·BOVA11", float(ibov.iloc[-1]), float(ibov.iloc[-1] / ibov.iloc[-2] - 1)))
+fita_itens += [(r_["ticker"], float(r_["preco"]), float(r_["var_dia"])) for _, r_ in rk.head(30).iterrows()]
+visual.fita(fita_itens)
 if atraso > 3:
     st.warning(fresco + " — **dados com mais de 3 dias úteis: clique em Apurar agora.**")
 else:
@@ -117,7 +128,7 @@ if R.get("demo"):
     st.error("⚠️ **MODO DEMONSTRAÇÃO — NÚMEROS FICTÍCIOS.** Nada aqui vale para investir. "
              "Clique em **🔄 Apurar agora (dados reais)** na barra lateral.")
 
-abas = st.tabs(["🤖 JARVIS", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
+abas = st.tabs(["🪙 AURUM", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
                 "🧪 O sistema funciona?", "🔔 Alertas", "❓ Como funciona e limites"])
 
 # carteira-alvo e números da meta, usados em várias abas
@@ -125,9 +136,9 @@ esc = aporte.escolher(rk, 10, 2)
 cart_esp = R.get("carteira_esperada") or meta.carteira_esperada(esc)
 pat_hoje = plano.patrimonio_atual(pl, cart, rk)
 
-# ======================================================================= JARVIS
+# ======================================================================= AURUM
 with abas[0]:
-    jv = R.get("jarvis") or jarvis.relatorio(R, pl, usar_ia=False)
+    jv = R.get("aurum") or aurum.relatorio(R, pl, usar_ia=False)
     sim0 = meta.simular(pl["meta"], pat_hoje, pl["aporte_mensal"], cart_esp["retorno"], cart_esp["volatilidade"],
                         pl["aumento_aporte_aa"], mac["ipca_12m"] if pl["corrigir_inflacao"] else 0.0)
     progresso = min(1.0, pat_hoje / pl["meta"]) if pl["meta"] else 0.0
@@ -144,29 +155,29 @@ with abas[0]:
                 + ("IA + PESQUISA NA WEB" if jv["fonte"] == "IA" else "MODO LOCAL (REGRAS)"))
     b1, b2 = st.columns([1, 3])
     if b1.button("🔁 Gerar novo relatório"):
-        with st.spinner("JARVIS analisando o mercado..."):
-            R["jarvis"] = jarvis.relatorio(R, pl)
+        with st.spinner("AURUM analisando o mercado..."):
+            R["aurum"] = aurum.relatorio(R, pl)
             with open(ULTIMO, "wb") as f:
                 pickle.dump(R, f)
         st.cache_data.clear()
         st.rerun()
-    if not jarvis.ia_disponivel():
-        b2.caption("Modo local: o JARVIS fala só a partir dos dados da apuração. Para ele pesquisar notícias na internet e "
+    if not aurum.ia_disponivel():
+        b2.caption("Modo local: o AURUM fala só a partir dos dados da apuração. Para ele pesquisar notícias na internet e "
                    "conversar livremente, coloque sua chave da IA (ANTHROPIC_API_KEY) no config.env — veja o README.")
 
-    st.subheader("Converse com o JARVIS")
+    st.subheader("Converse com o AURUM")
     hist = st.session_state.setdefault("chat", [])
     sug = st.columns(4)
     for col, q in zip(sug, ["O que comprar este mês?", "Quando chego no milhão?", "Melhores pagadoras de dividendos", "É seguro?"]):
         if col.button(q, width="stretch"):
             st.session_state["pergunta_rapida"] = q
     for m_ in hist:
-        with st.chat_message(m_["role"], avatar="🤖" if m_["role"] == "assistant" else "🧑"):
+        with st.chat_message(m_["role"], avatar="🪙" if m_["role"] == "assistant" else "🧑"):
             st.markdown(md(m_["content"]))
-    pergunta = st.chat_input("Pergunte ao JARVIS (ex.: TAEE11 vale a pena?)") or st.session_state.pop("pergunta_rapida", None)
+    pergunta = st.chat_input("Pergunte ao AURUM (ex.: TAEE11 vale a pena?)") or st.session_state.pop("pergunta_rapida", None)
     if pergunta:
-        with st.spinner("JARVIS pensando..."):
-            resp, _fonte = jarvis.perguntar(pergunta, [{"role": x["role"], "content": x["content"]} for x in hist], R, pl)
+        with st.spinner("AURUM pensando..."):
+            resp, _fonte = aurum.perguntar(pergunta, [{"role": x["role"], "content": x["content"]} for x in hist], R, pl)
         hist += [{"role": "user", "content": pergunta}, {"role": "assistant", "content": resp}]
         st.rerun()
     if hist and st.button("🧹 Limpar conversa"):
@@ -182,7 +193,7 @@ with abas[1]:
         hora_m = pd.Timestamp(M.get("hora") or R["data"])
         st.markdown(md(
             "Sete especialistas analisam **todas** as ações, cada um pelo seu ângulo, e votam de −2 a +2. Depois, "
-            "**um confere o trabalho do outro** (verificação cruzada) e o JARVIS só recomenda compra quando a nota do sistema "
+            "**um confere o trabalho do outro** (verificação cruzada) e o AURUM só recomenda compra quando a nota do sistema "
             "**e** a equipe concordam (dupla checagem)." + (" Hoje os especialistas também foram revisados por IA." if M.get("ia") else "")))
         ops_all = M["opinioes"]
         nota_de = dict(zip(rk["ticker"], rk["nota"]))
@@ -285,8 +296,8 @@ with abas[1]:
                 st.markdown(md(f"**{ag.apelido}** · {ag.nome} — **{'VETO' if o.get('veto') else rotulo[o['voto']]}**\n\n"
                                + "\n".join(f"- {a}" for a in o["argumentos"])))
         rr = rk.set_index("ticker").loc[t_deb]
-        with st.chat_message("JARVIS", avatar="🤖"):
-            st.markdown(md(f"**JARVIS** — consenso: **{rr['consenso']}** (placar {rr['placar']:+.2f}). "
+        with st.chat_message("AURUM", avatar="🪙"):
+            st.markdown(md(f"**AURUM** — consenso: **{rr['consenso']}** (placar {rr['placar']:+.2f}). "
                            f"Decisão final: **{rr['sinal']}**" + (f" — {rr['checagem']}." if rr.get("checagem") not in (None, "ok") else ".")))
 
         st.subheader("🔮 Íris — quem pode subir ou cair no próximo mês")
@@ -450,7 +461,7 @@ with abas[4]:
     f["renda fixa"] = [pat_hoje * (1 + rf_ret) ** a + sum(pl["aporte_mensal"] * (1 + pl["aumento_aporte_aa"]) ** (mm // 12)
                        * (1 + rf_ret) ** ((a * 12 - mm - 1) / 12) for mm in range(a * 12)) for a in f["ano"]]
     base = alt.Chart(f).encode(x=alt.X("ano:Q", title="Anos a partir de hoje"))
-    faixa = base.mark_area(opacity=0.14, color=visual.CIANO).encode(
+    faixa = base.mark_area(opacity=0.14, color=visual.DESTAQUE).encode(
         y=alt.Y("pessimista:Q", title="Patrimônio (R$)", axis=alt.Axis(format="~s")), y2="otimista:Q")
     longo = f.melt(id_vars="ano", value_vars=["mediana", "renda fixa", "meta", "investido"], var_name="linha", value_name="valor")
     nomes_l = {"mediana": "Ações — mais provável", "renda fixa": f"Renda fixa líquida ({pct(rf_ret)} a.a.)",
@@ -459,7 +470,7 @@ with abas[4]:
     linhas = alt.Chart(longo).mark_line(strokeWidth=2.5).encode(
         x="ano:Q", y="valor:Q",
         color=alt.Color("linha:N", title=None, legend=alt.Legend(orient="bottom", labelLimit=300),
-                        scale=alt.Scale(domain=list(nomes_l.values()), range=[visual.CIANO, visual.AMBAR, visual.VERMELHO, visual.CINZA])),
+                        scale=alt.Scale(domain=list(nomes_l.values()), range=[visual.DESTAQUE, visual.AZUL, visual.VERMELHO, visual.CINZA])),
         strokeDash=alt.condition(alt.datum.linha == "Meta", alt.value([6, 4]), alt.value([0])),
         tooltip=["ano", "linha", alt.Tooltip("valor:Q", format=",.0f")])
     st.altair_chart(faixa + linhas, width="stretch")
@@ -580,7 +591,7 @@ with abas[6]:
         st.markdown("**Cotação (5 anos) × preço-teto**")
         p5 = precos[precos.index > precos.index.max() - pd.DateOffset(years=5)].reset_index()
         p5.columns = ["data", "preco"]
-        camadas = [alt.Chart(p5).mark_line().encode(x=alt.X("data:T", title=None, axis=alt.Axis(format="%m/%Y")), y=alt.Y("preco:Q", title="R$", scale=alt.Scale(zero=False)),
+        camadas = [alt.Chart(p5).mark_line(color=visual.OURO).encode(x=alt.X("data:T", title=None, axis=alt.Axis(format="%m/%Y")), y=alt.Y("preco:Q", title="R$", scale=alt.Scale(zero=False)),
                                                       tooltip=[alt.Tooltip("data:T", format="%d/%m/%Y"), alt.Tooltip("preco:Q", format=".2f")])]
         if r["preco_teto_bazin"] == r["preco_teto_bazin"]:
             camadas.append(alt.Chart(pd.DataFrame({"y": [r["preco_teto_bazin"]]})).mark_rule(color=visual.VERDE, strokeDash=[6, 4]).encode(y="y:Q"))
@@ -594,7 +605,7 @@ with abas[6]:
             anual = prov.groupby(prov.index.year).sum().rename_axis("ano").reset_index(name="valor")
             anual["ano"] = anual["ano"].astype(str)
             anual.loc[anual.index[-1], "ano"] += " (parcial)" if int(anual["ano"].iloc[-1][:4]) == R["data"].year else ""
-            st.altair_chart(alt.Chart(anual).mark_bar().encode(
+            st.altair_chart(alt.Chart(anual).mark_bar(color=visual.OURO).encode(
                 x=alt.X("ano:N", title=None), y=alt.Y("valor:Q", title="R$ por ação"),
                 tooltip=["ano", alt.Tooltip("valor:Q", format=".2f", title="R$ por ação")]), width="stretch")
             st.caption(f"Costuma pagar em: **{r.get('meses_provaveis', '—')}**. "
@@ -721,7 +732,7 @@ with abas[8]:
         st.altair_chart(alt.Chart(s).mark_line(strokeWidth=2.5).encode(
             x=alt.X("data:T", title=None, axis=alt.Axis(format="%m/%Y")), y=alt.Y("valor:Q", title="R$", axis=alt.Axis(format="~s")),
             color=alt.Color("linha:N", title=None, legend=alt.Legend(orient="bottom"),
-                            scale=alt.Scale(domain=list(nomes_b.values()), range=[visual.CIANO, visual.AMBAR, "#B388FF", visual.CINZA])),
+                            scale=alt.Scale(domain=list(nomes_b.values()), range=[visual.DESTAQUE, visual.AZUL, "#B388FF", visual.CINZA])),
             tooltip=[alt.Tooltip("data:T", format="%m/%Y"), "linha", alt.Tooltip("valor:Q", format=",.0f")]), width="stretch")
         st.metric("Proventos que essa carteira pagou nos últimos 12 meses", brl(bt["proventos_12m"]))
         if not bt.get("cdi_real", True):

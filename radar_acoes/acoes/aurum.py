@@ -1,4 +1,4 @@
-"""J.A.R.V.I.S. — o assistente do Radar de Ações.
+"""AURUM — o assistente do Radar de Ações.
 
 Dois modos:
 - Sem chave de IA: fala a partir de regras, usando só os dados da apuração (funciona sempre, de graça).
@@ -127,7 +127,7 @@ def texto_iris(c: dict) -> str:
 
 # ------------------------------------------------------------------ voz por regras (sem IA)
 def relatorio_regras(c: dict) -> list[str]:
-    """Relatório do dia em tópicos, no tom do JARVIS, só com dados da apuração."""
+    """Relatório do dia em tópicos, no tom do AURUM, só com dados da apuração."""
     p, proj, mac = c["plano"], c["projecao"], c["macro"]
     nome = c.get("nome") or ""
     linhas = [f"{saudacao(nome)}. Varredura concluída: {c['n_empresas']} empresas analisadas"
@@ -247,8 +247,8 @@ def responder_regras(pergunta: str, c: dict, R: dict) -> str:
 
 
 # ------------------------------------------------------------------ IA (Claude), opcional
-SISTEMA = """Você é J.A.R.V.I.S., o assistente de investimentos pessoal do usuário, inspirado no assistente do Homem de Ferro:
-cordial, confiante, preciso, levemente espirituoso, sempre em português do Brasil. O objetivo do usuário é construir patrimônio
+SISTEMA = """Você é AURUM, o estrategista-chefe de investimentos do usuário, com o tom de uma mesa de operações profissional:
+objetivo, preciso, confiante e cordial, sempre em português do Brasil. O objetivo do usuário é construir patrimônio
 (meta no contexto) com aportes mensais em ações brasileiras que pagam dividendos e JCP, no longo prazo.
 
 Regras inegociáveis:

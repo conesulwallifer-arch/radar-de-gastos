@@ -19,7 +19,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, dados, demo, jarvis, macro, memoria, mesa, meta, noticias, plano, previsao, previsor, universo  # noqa: E402
+from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, dados, demo, aurum, macro, memoria, mesa, meta, noticias, plano, previsao, previsor, universo  # noqa: E402
 
 HIST = DADOS / "historico"
 REL = DADOS / "relatorios"
@@ -139,8 +139,8 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     rebaixa = rk["sinal"].isin(["Comprar", "Acumular"]) & (rk["checagem"] != "ok")
     rk.loc[rebaixa, "sinal"] = "Aguardar"
     rk.loc[rk["sinal"].eq("Comprar") & rk["consenso"].eq("Neutro"), "sinal"] = "Acumular"
-    print(f"   🤖 JARVIS (dupla checagem): {int(rebaixa.sum())} ação(ões) tiradas das compras por falta de confirmação.")
-    falar(f"🤖 **JARVIS** fez a dupla checagem (nota do sistema × mesa): {int(rebaixa.sum())} ação(ões) saíram da lista de compras.")
+    print(f"   🪙 AURUM (dupla checagem): {int(rebaixa.sum())} ação(ões) tiradas das compras por falta de confirmação.")
+    falar(f"🪙 **AURUM** fez a dupla checagem (nota do sistema × mesa): {int(rebaixa.sum())} ação(ões) saíram da lista de compras.")
 
     alts = alertas.gerar(rk, anterior(hoje), news, carteira=cart["ticker"].tolist())
     compras, sobra = aporte.sugerir(rk, valor_aporte, cart) if valor_aporte > 0 else (pd.DataFrame(), 0.0)
@@ -166,7 +166,7 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
                  "info": {t: d["info"] for t, d in base.items()},
                  "macro": mac, "backtest": bt, "carteira_esperada": cart_esp, "ibov": ibov,
                  "mesa": reuniao, "previsor": {"validacao": validacao, "fator": fator, "placar_real": placar}}
-    print("🤖 JARVIS escrevendo o relatório do dia" + (" (IA + pesquisa na web)..." if usar_ia and jarvis.ia_disponivel() else "..."))
+    print("🪙 AURUM escrevendo o relatório do dia" + (" (IA + pesquisa na web)..." if usar_ia and aurum.ia_disponivel() else "..."))
     falar("🧭 **Atlas** (explorador autônomo) está decidindo por conta própria o que investigar...")
     resumo_atlas = mesa.resumo_texto(reuniao) + "\n" + "\n".join(
         f"{int(r['posicao'])}. {r['ticker']} nota {r['nota']:.0f} sinal {r['sinal']} consenso {r.get('consenso')}"
@@ -175,9 +175,9 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     for passo in resultado["atlas"]["diario"]:
         falar("   🧭 Atlas " + passo)
     resultado["alertas"] = sorted(alts + resultado["atlas"]["alertas"], key=lambda a: (a["nivel"], a["ticker"]))
-    falar("🤖 **JARVIS** está escrevendo o relatório do dia...")
-    resultado["jarvis"] = jarvis.relatorio(resultado, pl, usar_ia=usar_ia)
-    texto = "🤖 J.A.R.V.I.S.\n\n" + resultado["jarvis"]["texto"].replace("**", "") + "\n\n" + "─" * 20 + "\n\n" + texto
+    falar("🪙 **AURUM** está escrevendo o relatório do dia...")
+    resultado["aurum"] = aurum.relatorio(resultado, pl, usar_ia=usar_ia)
+    texto = "🪙 AURUM\n\n" + resultado["aurum"]["texto"].replace("**", "") + "\n\n" + "─" * 20 + "\n\n" + texto
     texto = texto.replace("─" * 20, "🧭 Atlas, o explorador:\n" + resultado["atlas"]["relatorio"].replace("**", "") + "\n\n" + "─" * 20, 1)
     (REL / f"relatorio_{hoje:%Y-%m-%d}.txt").write_text(texto, encoding="utf-8")
     with open(ULTIMO, "wb") as f:
@@ -204,7 +204,7 @@ def main():
     ap.add_argument("--sem-noticias", action="store_true")
     ap.add_argument("--sem-envio", action="store_true", help="não envia Telegram/e-mail")
     ap.add_argument("--forcar", action="store_true", help="ignora o cache do dia e baixa de novo")
-    ap.add_argument("--sem-ia", action="store_true", help="JARVIS só por regras, mesmo com chave da IA")
+    ap.add_argument("--sem-ia", action="store_true", help="AURUM só por regras, mesmo com chave da IA")
     a = ap.parse_args()
     alertas.carregar_config()
     if not a.aporte:

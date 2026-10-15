@@ -135,8 +135,8 @@ def test_confianca_detecta_dado_estranho():
     assert ok["confianca"] == "Alta" and "pagou em 9" in ok["por_que"]
 
 
-# ---------------------------------------------------------------- JARVIS e vigia
-from acoes import jarvis, vigia  # noqa: E402
+# ---------------------------------------------------------------- AURUM e vigia
+from acoes import aurum, vigia  # noqa: E402
 
 
 def _R():
@@ -149,16 +149,16 @@ def _R():
             "macro": {"selic": 0.14, "ipca_12m": 0.045, "cdi_liquido": 0.119, "estimado": False}}
 
 
-def test_jarvis_sem_ia_responde_com_dados(monkeypatch):
-    monkeypatch.setenv("JARVIS_SEM_IA", "1")
+def test_aurum_sem_ia_responde_com_dados(monkeypatch):
+    monkeypatch.setenv("AURUM_SEM_IA", "1")
     R = _R()
     pl = {"aporte_mensal": 1000.0, "meta": 1_000_000.0, "aumento_aporte_aa": 0.05, "patrimonio_fora_bolsa": 0.0,
-          "corrigir_inflacao": False, "nome": "Tony"}
-    rel = jarvis.relatorio(R, pl)
-    assert rel["fonte"] == "regras" and "Tony" in rel["texto"] and "R$ 1.000.000" in rel["texto"]
-    resp, fonte = jarvis.perguntar("B1A3 vale a pena?", [], R, pl)
+          "corrigir_inflacao": False, "nome": "Ana"}
+    rel = aurum.relatorio(R, pl)
+    assert rel["fonte"] == "regras" and "Ana" in rel["texto"] and "R$ 1.000.000" in rel["texto"]
+    resp, fonte = aurum.perguntar("B1A3 vale a pena?", [], R, pl)
     assert fonte == "regras" and "B1A3" in resp and "preço-teto" in resp
-    assert "anos" in jarvis.perguntar("quando chego no milhão?", [], R, pl)[0]
+    assert "anos" in aurum.perguntar("quando chego no milhão?", [], R, pl)[0]
 
 
 def test_vigia_avisa_uma_vez_por_dia(tmp_path, monkeypatch):
