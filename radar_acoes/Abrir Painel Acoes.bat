@@ -3,6 +3,8 @@ REM Abre o painel AURUM no navegador (http://localhost:8501).
 REM Deixe esta janela aberta enquanto usa o painel: fechar = desligar o painel.
 cd /d "%~dp0"
 title AURUM - painel
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
 
 python --version >nul 2>&1
 if errorlevel 1 (

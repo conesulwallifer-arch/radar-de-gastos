@@ -26,6 +26,18 @@ REL = DADOS / "relatorios"
 ULTIMO = DADOS / "ultimo.pkl"
 
 
+_print_original = print
+
+
+def print(*args, **kwargs):  # noqa: A001 — mensagens de acompanhamento nunca podem derrubar a apuração
+    try:
+        _print_original(*args, **kwargs)
+    except UnicodeEncodeError:
+        _print_original(*(str(a).encode("ascii", "replace").decode() for a in args), **kwargs)
+    except (OSError, ValueError):
+        pass
+
+
 def _tx(x: float) -> str:
     return f"{x * 100:.2f}%".replace(".", ",")
 

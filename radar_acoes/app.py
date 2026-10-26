@@ -14,6 +14,16 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Painel aberto sem janela no Windows: a saída vai para arquivo em cp1252, que não escreve emojis.
+# Fica aqui (e não só em acoes/__init__) porque o Streamlit relê este arquivo a cada clique: vale na hora,
+# mesmo com o painel antigo ainda rodando.
+for _fluxo in (sys.stdout, sys.stderr):
+    try:
+        if (getattr(_fluxo, "encoding", "") or "").lower().replace("-", "") != "utf8":
+            _fluxo.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from acoes import AVISO, agenda, aporte, atlas, aurum, escritorio, memoria, mesa, meta, plano, universo, visual  # noqa: E402
 import segundo_plano  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
