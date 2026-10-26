@@ -15,6 +15,7 @@ O painel tem o visual de um terminal de mercado financeiro (fundo escuro, dourad
 | O que ele faz | Quando |
 |---|---|
 | **Vigia o pregão**: confere as 15 melhores ações e as da sua carteira e avisa no Telegram/e-mail se uma ação boa cair abaixo do preço-teto ou despencar ≥ 4% | a cada 30 min, das 10h às 18h (dias úteis) |
+| **Apuração da hora**: baixa preços novos e refaz ranking, previsões, mesa dos 7 especialistas e alertas do painel (sem IA paga e sem mensagem no Telegram) | de hora em hora, das 10h às 17h (dias úteis) — `AURUM_APURAR_A_CADA_MIN` |
 | **Apuração completa**: refaz notas, previsões, meta, teste no passado, notícias e escreve o **relatório do dia** | todo dia útil às 18h30 |
 | **Conversa** no painel (aba 🪙 AURUM): "TAEE11 vale a pena?", "o que comprar este mês?", "quando chego no milhão?" | quando você quiser |
 
@@ -89,6 +90,7 @@ rodar escondida e **liga sozinha sempre que o Windows iniciar** — não precisa
 |---|---|---|
 | Ao ligar o computador | AURUM | Se perdeu alguma apuração, coloca o trabalho em dia na hora |
 | Dias úteis, 10h–18h, a cada 30 min | Rex e Téo | Vigiam os preços das melhores ações e da sua carteira; avisam no Telegram |
+| Dias úteis, 10h–17h, de hora em hora | Todos (sem IA) | Apuração da hora com preços novos: o painel sempre mostra o pregão de agora |
 | Dias úteis, 18h30 | Todos | Reunião completa: coleta, 7 especialistas, verificação cruzada, Atlas, memória, relatório |
 | Sábado, 10h | AURUM | Reunião semanal: o que mudou na semana, placar real da equipe, anotações do Atlas |
 

@@ -7,7 +7,8 @@
 
 Rotina da equipe (horário de Brasília):
 - ao ligar: se perdeu alguma apuração (computador desligado), faz na hora para não começar o dia com dado velho;
-- dias úteis, 10h–18h: a cada 30 min Rex e Téo conferem os preços das melhores ações e da sua carteira;
+- dias úteis, 10h–18h: a cada 1 hora, apuração completa com preços novos (ranking, previsões, mesa, alertas no painel);
+  entre uma e outra, Rex e Téo conferem os preços das melhores ações e da sua carteira a cada 30 min;
 - dias úteis, 18h30: reunião completa — coleta, notas, 7 especialistas, verificação cruzada, Atlas, relatório;
 - sábado, 10h: reunião semanal com o placar da equipe e o que mudou na semana.
 Tudo o que fazem fica no diário da equipe (aba 🧠 Sala dos Agentes) e o importante chega no seu Telegram.
@@ -27,15 +28,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acoes import DADOS, alertas, aporte, escritorio, plano, semanal, universo, vigia  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
 
+alertas.carregar_config()  # config.env antes de ler os intervalos abaixo
 FUSO = ZoneInfo("America/Sao_Paulo")
 INTERVALO_MIN = int(os.getenv("AURUM_INTERVALO_MIN") or os.getenv("JARVIS_INTERVALO_MIN") or "30")
 HORA_APURACAO = (18, 30)
+# apuração completa durante o pregão a cada N minutos (0 = só a das 18h30). Configurável no config.env.
+APURAR_A_CADA_MIN = int(os.getenv("AURUM_APURAR_A_CADA_MIN") or "60")
 HORA_SEMANAL = (10, 0)
 VIVO = DADOS / "agente_vivo.txt"
 TRAVA = DADOS / "agente.lock"
 LOG = DADOS / "agente.log"
 SEMANAL_FEITA = DADOS / "semanal_ultima.txt"
 PID = DADOS / "agente.pid"
+FECHAMENTO = DADOS / "fechamento_ultimo.txt"  # pregão coberto pela última reunião completa (a das 18h30)
 
 
 def agora() -> datetime:
@@ -55,13 +60,11 @@ def ultimo_pregao_fechado(t: datetime) -> date:
 
 
 def data_ultima_apuracao() -> date | None:
-    if not ULTIMO.exists():
-        return None
+    """Pregão coberto pela última reunião completa de fechamento. As apurações da hora não contam: elas não
+    trazem a análise com IA nem o relatório do dia, então não podem 'pular' a reunião das 18h30."""
     try:
-        with open(ULTIMO, "rb") as f:
-            R = pickle.load(f)
-        return None if R.get("demo") else R["data"]
-    except Exception:  # noqa: BLE001
+        return date.fromisoformat(FECHAMENTO.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
         return None
 
 
@@ -80,7 +83,30 @@ def enviar(texto: str, assunto: str) -> None:
 def apuracao_completa() -> None:
     print(f"[{agora():%d/%m %H:%M}] 🪙 Reunião completa da equipe começando...")
     escritorio.registrar("aurum", "convocou a equipe para a apuração completa")
-    apurar(universo.tickers(), plano.ler()["aporte_mensal"])  # já envia o relatório do AURUM
+    coberto = ultimo_pregao_fechado(agora())
+    apurar(universo.tickers(), plano.ler()["aporte_mensal"], forcar=True)  # já envia o relatório do AURUM
+    FECHAMENTO.write_text(coberto.isoformat(), encoding="utf-8")
+
+
+_INICIO_ULTIMA: list[float] = []  # quando começou a última apuração (conta do início: "de hora em hora" certinho)
+
+
+def minutos_desde_ultima_apuracao() -> float:
+    try:
+        ref = _INICIO_ULTIMA[-1] if _INICIO_ULTIMA else ULTIMO.stat().st_mtime
+        return (time.time() - ref) / 60
+    except OSError:
+        return float("inf")
+
+
+def apuracao_horaria() -> None:
+    """Durante o pregão: tudo de novo com preços frescos. Sem relatório no Telegram (só o das 18h30 e os alertas
+    do vigia) e sem IA paga (as regras dos 7 especialistas rodam; a IA entra na reunião das 18h30)."""
+    _INICIO_ULTIMA.append(time.time())
+    print(f"[{agora():%d/%m %H:%M}] 🪙 Apuração da hora (preços novos)...")
+    escritorio.registrar("aurum", "convocou a equipe para a apuração da hora, com preços novos do pregão")
+    apurar(universo.tickers(), plano.ler()["aporte_mensal"], enviar=False, forcar=True, usar_ia=False)
+    escritorio.status("aurum", "pausa", f"próxima apuração por volta das {agora() + timedelta(minutes=APURAR_A_CADA_MIN):%H:%M}")
 
 
 def checagem() -> None:
@@ -128,7 +154,8 @@ def semanal_pendente(t: datetime) -> bool:
 
 def descricao_proxima(t: datetime) -> str:
     if pregao_aberto(t):
-        return f"vigiando o pregão a cada {INTERVALO_MIN} min"
+        return (f"apuração completa a cada {APURAR_A_CADA_MIN} min e vigia a cada {INTERVALO_MIN} min" if APURAR_A_CADA_MIN
+                else f"vigiando o pregão a cada {INTERVALO_MIN} min")
     if t.weekday() < 5 and (t.hour, t.minute) < (10, 0):
         return "volta às 10h, na abertura do pregão"
     if t.weekday() < 5 and (t.hour, t.minute) < HORA_APURACAO:
@@ -173,6 +200,8 @@ def vigiar() -> None:
                 apuracao_completa()
             elif semanal_pendente(t):
                 reuniao_semanal()
+            elif pregao_aberto(t) and APURAR_A_CADA_MIN and minutos_desde_ultima_apuracao() >= APURAR_A_CADA_MIN - 2:
+                apuracao_horaria()
             elif pregao_aberto(t):
                 checagem()
             else:
@@ -183,6 +212,8 @@ def vigiar() -> None:
             escritorio.status("aurum", "erro", f"tentando de novo: {str(e)[:80]}")
         # dorme em blocos de 5 min mandando sinal de vida (o painel mostra 'equipe ligada')
         alvo = agora() + timedelta(minutes=INTERVALO_MIN)
+        if APURAR_A_CADA_MIN and pregao_aberto(agora()):
+            alvo = min(alvo, agora() + timedelta(minutes=max(1.0, APURAR_A_CADA_MIN - minutos_desde_ultima_apuracao())))
         if not pregao_aberto(alvo) and t.weekday() < 5 and (t.hour, t.minute) < HORA_APURACAO <= (alvo.hour, alvo.minute):
             alvo = alvo.replace(hour=HORA_APURACAO[0], minute=HORA_APURACAO[1], second=5)
         while agora() < alvo:
@@ -195,6 +226,7 @@ def main():
     ap.add_argument("--agora", action="store_true", help="apuração completa + relatório agora")
     ap.add_argument("--checar", action="store_true", help="confere os preços do pregão uma vez agora")
     ap.add_argument("--semanal", action="store_true", help="reunião semanal agora")
+    ap.add_argument("--hora", action="store_true", help="apuração da hora (preços novos, sem envio) agora")
     a = ap.parse_args()
     if sys.stdout is None or os.getenv("AURUM_OCULTO"):  # rodando escondido (pythonw): tudo vai para o arquivo de log
         LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -208,6 +240,8 @@ def main():
         checagem()
     elif a.semanal:
         reuniao_semanal()
+    elif a.hora:
+        apuracao_horaria()
     else:
         vigiar()
 
