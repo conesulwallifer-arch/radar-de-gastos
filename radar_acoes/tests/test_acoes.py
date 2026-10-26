@@ -371,8 +371,10 @@ def test_sala_3d_tem_arquivos_e_dados(monkeypatch):
         assert (raiz / arq).exists(), arq
     assert "enableStaticServing = true" in (raiz / ".streamlit/config.toml").read_text()
     capturado = {}
+    import streamlit as st
     import streamlit.components.v1 as comp
     monkeypatch.setattr(comp, "html", lambda html, height: capturado.update(html=html, altura=height))
+    monkeypatch.setattr(st, "iframe", lambda src, height: capturado.update(html=src, altura=height), raising=False)
     mesas = [{"id": a, "nome": n, "cargo": c, "estado": "trabalhando"} for a, (n, _, c) in escritorio.EQUIPE.items()]
     visual.sala_3d(mesas, True, 14, [("TAEE11", 34.5, 0.012), ("VALE3", 60.0, float("nan"))])
     h = capturado["html"]

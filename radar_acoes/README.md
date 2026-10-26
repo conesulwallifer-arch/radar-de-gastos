@@ -94,6 +94,12 @@ rodar escondida e **liga sozinha sempre que o Windows iniciar** — não precisa
 | Dias úteis, 18h30 | Todos | Reunião completa: coleta, 7 especialistas, verificação cruzada, Atlas, memória, relatório |
 | Sábado, 10h | AURUM | Reunião semanal: o que mudou na semana, placar real da equipe, anotações do Atlas |
 
+### 📡 Mercado ao vivo
+A aba **📡 Mercado ao vivo** mostra todas as ações acompanhadas no pregão de hoje — o que **sobe** e o que **cai**,
+o Ibovespa, mínima/máxima e o gráfico do dia — e **se atualiza sozinha a cada minuto** (dá para pausar no botão *Ao vivo*).
+Filtros: todas, só as recomendadas ou só a sua carteira. Destaca **boas empresas em queda abaixo do preço-teto**.
+Fonte: Yahoo Finance, com **atraso de ~15 minutos** para a B3 (cotação em tempo real de verdade só com contrato pago da B3).
+
 Na aba **🧠 Sala dos Agentes**, o **Escritório em 3D** (Three.js, roda no seu computador, sem internet) mostra a sala com
 cada agente como um boneco 3D na sua mesa: digitando quando trabalha, olhando em volta e mexendo o mouse quando vigia,
 recostado tomando café na pausa; o monitor de cada um mostra a sua função, e o telão da parede tem a fita de cotações.
