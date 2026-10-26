@@ -9,6 +9,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import altair as alt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -24,7 +25,7 @@ for _fluxo in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-from acoes import AVISO, agenda, aporte, atlas, aurum, escritorio, memoria, mesa, meta, plano, universo, visual  # noqa: E402
+from acoes import AVISO, agenda, aovivo, aporte, atlas, aurum, escritorio, memoria, mesa, meta, plano, universo, visual  # noqa: E402
 import segundo_plano  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
 
@@ -163,7 +164,7 @@ if R.get("demo"):
     st.error("⚠️ **MODO DEMONSTRAÇÃO — NÚMEROS FICTÍCIOS.** Nada aqui vale para investir. "
              "Clique em **🔄 Apurar agora (dados reais)** na barra lateral.")
 
-abas = st.tabs(["🪙 AURUM", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
+abas = st.tabs(["🪙 AURUM", "📡 Mercado ao vivo", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
                 "🧪 O sistema funciona?", "🔔 Alertas", "❓ Como funciona e limites"])
 
 # carteira-alvo e números da meta, usados em várias abas
@@ -219,8 +220,134 @@ with abas[0]:
         st.session_state["chat"] = []
         st.rerun()
 
-# ======================================================================= SALA DOS AGENTES
+
+# ======================================================================= MERCADO AO VIVO
+@st.cache_data(ttl=55, show_spinner=False)
+def _cotacoes_ao_vivo(tickers: tuple[str, ...]):
+    return aovivo.resumir(*aovivo.baixar(list(tickers)))
+
+
 with abas[1]:
+    st.caption("Todas as ações que a equipe acompanha, no pregão de hoje. **Atualiza sozinho a cada minuto** — "
+               f"não precisa apertar nada. Fonte: {aovivo.FONTE}.")
+    c_ao, c_fil, c_busca = st.columns([1, 2, 2])
+    ligado = c_ao.toggle("🔴 Ao vivo", value=True, key="ao_vivo_ligado", help="Desligue para congelar a tela.")
+    filtro = c_fil.segmented_control("Mostrar", ["Todas", "Recomendadas", "Minha carteira"], default="Todas",
+                                     key="ao_vivo_filtro", label_visibility="collapsed")
+    busca = c_busca.text_input("Buscar", placeholder="🔎 buscar ação (ex.: PETR4)", key="ao_vivo_busca",
+                               label_visibility="collapsed").strip().upper()
+
+    @st.fragment(run_every=60 if ligado else None)
+    def _mercado_ao_vivo():
+        lista = tuple(sorted(set(rk["ticker"]) | set(cart["ticker"])))
+        try:
+            ao = _cotacoes_ao_vivo(lista)
+            if ao.empty:
+                raise RuntimeError("o Yahoo Finance não devolveu cotações")
+            st.session_state["ao_vivo_ultimo"] = ao
+        except Exception as e:  # noqa: BLE001 — sem internet ou Yahoo fora: mostra a última leitura boa
+            ao = st.session_state.get("ao_vivo_ultimo")
+            if ao is None:
+                st.warning(f"Não consegui buscar as cotações agora ({str(e)[:120]}). Tento de novo em 1 minuto.")
+                return
+            st.warning("Falha ao atualizar agora — mostrando a última leitura. Tento de novo em 1 minuto.")
+        ib = ao[ao["ticker"] == aovivo.IBOV]
+        acoes_ao = ao[ao["ticker"] != aovivo.IBOV].merge(
+            rk[["ticker", "nome", "setor", "sinal", "nota", "preco_teto_bazin"]], on="ticker", how="left")
+        hora = pd.to_datetime(acoes_ao["hora"]).max()
+        aberto = aovivo.pregao_aberto()
+        pc = aovivo.placar(acoes_ao)
+        ibv = float(ib["var_dia"].iloc[0]) if not ib.empty else float("nan")
+        visual.cartoes([
+            ("IBOVESPA", (("+" if ibv > 0 else "−" if ibv < 0 else "") + pct(abs(ibv), 2)) if ibv == ibv else "—", "hoje", "sobe" if ibv > 0 else "cai" if ibv < 0 else ""),
+            ("SUBINDO", f"🟢 {pc['sobem']}", "ações em alta", "sobe"),
+            ("CAINDO", f"🔴 {pc['caem']}", "ações em queda", "cai"),
+            ("ESTÁVEIS", f"⚪ {pc['estaveis']}", "entre −0,1% e +0,1%", ""),
+            ("PREGÃO", "🟢 ABERTO" if aberto else "⚫ FECHADO",
+             f"cotação das {hora:%H:%M} de {hora:%d/%m}" if pd.notna(hora) else "", ""),
+        ])
+        if not aberto:
+            st.info("Pregão fechado: a tela mostra como as ações terminaram o último pregão. Volta a se mexer às 10h.")
+
+        vis = acoes_ao
+        if filtro == "Recomendadas":
+            vis = vis[vis["sinal"].isin(["Comprar", "Acumular"])]
+        elif filtro == "Minha carteira":
+            vis = vis[vis["ticker"].isin(cart["ticker"])]
+        if busca:
+            vis = vis[vis["ticker"].str.contains(busca, regex=False) | vis["nome"].fillna("").str.upper().str.contains(busca, regex=False)]
+        if vis.empty:
+            st.info("Nenhuma ação neste filtro.")
+            return
+
+        def _lista(df, titulo):
+            st.markdown(f"**{titulo}**")
+            for _, r in df.iterrows():
+                cor = visual.VERDE if r["var_dia"] > 0 else visual.VERMELHO
+                seta = "▲" if r["var_dia"] > 0 else "▼"
+                st.markdown(f"<div style='display:flex;justify-content:space-between;font-family:IBM Plex Mono,monospace;"
+                            f"padding:2px 0;border-bottom:1px solid #22262e'><span><b>{r['ticker']}</b> "
+                            f"<small style='color:#7D8590'>{brl(r['preco'])}</small></span>"
+                            f"<span style='color:{cor};font-weight:600'>{seta} {pct(abs(r['var_dia']), 2)}</span></div>"
+                            .replace("$", "&#36;"), unsafe_allow_html=True)
+
+        com_var = vis.dropna(subset=["var_dia"])
+        c1, c2 = st.columns(2)
+        with c1:
+            _lista(com_var[com_var["var_dia"] > 0.001].head(8), "🟢 Maiores altas agora")
+        with c2:
+            _lista(com_var[com_var["var_dia"] < -0.001].sort_values("var_dia").head(8), "🔴 Maiores quedas agora")
+
+        oport = com_var[(com_var["sinal"].isin(["Comprar", "Acumular"])) & (com_var["var_dia"] < 0)
+                        & (com_var["preco"] <= com_var["preco_teto_bazin"])]
+        if not oport.empty:
+            st.success("💡 **Boas empresas em queda hoje, abaixo do preço-teto:** " + ", ".join(
+                f"**{r['ticker']}** ({pct(r['var_dia'], 1)}, {brl(r['preco'])})" for _, r in oport.head(6).iterrows()).replace("$", "\\$")
+                + " — para quem compra para o longo prazo, queda em empresa boa pode ser chance de comprar mais barato.")
+
+        graf = com_var.assign(var_pct=com_var["var_dia"] * 100, lado=np.where(com_var["var_dia"] >= 0, "Sobe", "Cai"))
+        st.altair_chart(
+            alt.Chart(graf).mark_bar().encode(
+                x=alt.X("ticker:N", sort="-y", title=None, axis=alt.Axis(labelAngle=-60)),
+                y=alt.Y("var_pct:Q", title="Variação hoje (%)"),
+                color=alt.Color("lado:N", scale=alt.Scale(domain=["Sobe", "Cai"], range=[visual.VERDE, visual.VERMELHO]), legend=None),
+                tooltip=[alt.Tooltip("ticker:N", title="Ação"), alt.Tooltip("nome:N", title="Empresa"),
+                         alt.Tooltip("var_pct:Q", title="Hoje (%)", format="+.2f"), alt.Tooltip("preco:Q", title="Preço (R$)", format=",.2f")],
+            ).properties(height=260), width="stretch")
+
+        vis = vis.assign(**{c: vis[c].round(2) for c in ("preco", "minima", "maxima")})
+        tab = vis.assign(
+            tendencia=np.where(vis["var_dia"] > 0.001, "🟢 ▲", np.where(vis["var_dia"] < -0.001, "🔴 ▼", "⚪ ■")),
+            var_pct=vis["var_dia"] * 100,
+            sinal_txt=vis["sinal"].map(lambda x: f"{COR_SINAL.get(x, '')} {x}" if isinstance(x, str) else "—"),
+            abaixo_teto=np.where(vis["preco"] <= vis["preco_teto_bazin"], "✅ sim", "—"),
+        )[["tendencia", "ticker", "nome", "preco", "var_pct", "minima", "maxima", "grafico", "sinal_txt", "nota", "preco_teto_bazin", "abaixo_teto", "setor"]]
+        st.dataframe(
+            tab.style.map(lambda v: f"color: {visual.VERDE}" if v > 0 else f"color: {visual.VERMELHO}" if v < 0 else "",
+                          subset=["var_pct"]),
+            hide_index=True, width="stretch", height=min(38 * (len(tab) + 1), 760),
+            column_config={
+                "tendencia": st.column_config.TextColumn(" ", width="small"),
+                "ticker": st.column_config.TextColumn("Ação"),
+                "nome": st.column_config.TextColumn("Empresa"),
+                "preco": col_rs("Agora"),
+                "var_pct": st.column_config.NumberColumn("Hoje (%)", format="%+.2f"),
+                "minima": col_rs("Mín. do dia"),
+                "maxima": col_rs("Máx. do dia"),
+                "grafico": st.column_config.LineChartColumn("Gráfico do dia"),
+                "sinal_txt": st.column_config.TextColumn("Sinal da equipe", help="O que a equipe recomenda para o longo prazo (apuração)."),
+                "nota": st.column_config.ProgressColumn("Nota", min_value=0, max_value=100, format="%.0f"),
+                "preco_teto_bazin": col_rs("Preço-teto", "Até esse preço, os proventos médios rendem 6% ao ano (Bazin)."),
+                "abaixo_teto": st.column_config.TextColumn("Abaixo do teto?"),
+                "setor": st.column_config.TextColumn("Setor"),
+            })
+        st.caption(f"Atualizado às {datetime.now(aovivo.FUSO):%H:%M:%S}. Lembrete: o sobe-e-desce de um dia é ruído para quem "
+                   "investe no longo prazo — use esta tela para achar bons preços, não para vender no susto.")
+
+    _mercado_ao_vivo()
+
+# ======================================================================= SALA DOS AGENTES
+with abas[2]:
     @st.fragment(run_every=20)
     def _sala_ao_vivo():
         """Atualiza sozinho a cada 20 s: dá para ver a equipe trabalhando enquanto o agente roda."""
@@ -397,7 +524,7 @@ with abas[1]:
                        "Cada previsão diária é registrada e conferida 1 mês depois — o placar real aparece acima.")
 
 # ======================================================================= HOJE
-with abas[2]:
+with abas[3]:
     st.subheader(f"Este mês, com {brl(pl['aporte_mensal'])} de aporte, compre:")
     compras, sobra = aporte.sugerir(rk, pl["aporte_mensal"], cart)
     if compras.empty:
@@ -484,7 +611,7 @@ with abas[2]:
         st.caption(f"+ {len(imp) - 8} alertas na aba 🔔 Alertas.")
 
 # ======================================================================= AGENDA
-with abas[3]:
+with abas[4]:
     st.subheader("📅 Quanto você deve receber nos próximos 12 meses")
     compras_ag, _ = aporte.sugerir(rk, pl["aporte_mensal"], cart)
     atual = dict(zip(cart["ticker"], cart["quantidade"])) if len(cart) else {}
@@ -521,7 +648,7 @@ with abas[3]:
                    "Use isto para encaixar compras que você já ia fazer.")
 
 # ======================================================================= META
-with abas[4]:
+with abas[5]:
     st.subheader("🎯 Quanto tempo até a sua meta — e o que te leva mais rápido")
     st.caption("O sistema simula 5.000 futuros possíveis para a bolsa (anos bons e ruins, na proporção do passado) "
                "e mostra a CHANCE de você chegar até cada ano. Ninguém consegue prometer uma data exata.")
@@ -603,7 +730,7 @@ with abas[4]:
                  hide_index=True, width="stretch")
 
 # ======================================================================= RANKING
-with abas[5]:
+with abas[6]:
     st.caption("Todas as ações acompanhadas, da melhor para a pior para quem quer **renda + patrimônio no longo prazo**. "
                "Passe o mouse no título de cada coluna para ver o que significa.")
     f1, f2, f3 = st.columns([2, 2, 1])
@@ -657,7 +784,7 @@ with abas[5]:
         st.caption(f"Sem dados nesta apuração (código pode ter mudado na B3): {', '.join(R['sem_dados'])}")
 
 # ======================================================================= EMPRESA
-with abas[6]:
+with abas[7]:
     nomes = rk.set_index("ticker")["nome"]
     t = st.selectbox("Escolha a empresa", rk["ticker"], format_func=lambda x: f"{x} — {nomes[x]}")
     r = rk.set_index("ticker").loc[t]
@@ -779,7 +906,7 @@ with abas[6]:
                      hide_index=True, width="stretch")
 
 # ======================================================================= CARTEIRA
-with abas[7]:
+with abas[8]:
     st.markdown("**Minha carteira** — digite as ações que você já tem e clique em Salvar. "
                 "O aporte do mês passa a completar o que está abaixo do alvo, e os alertas acompanham as suas ações.")
     base_cart = cart if not cart.empty else pd.DataFrame({"ticker": pd.Series(dtype=str), "quantidade": pd.Series(dtype=float),
@@ -809,7 +936,7 @@ with abas[7]:
         st.caption("'Evitar' numa ação que você já tem não é ordem de venda: é um sinal para olhar as notícias e os resultados.")
 
 # ======================================================================= BACKTEST
-with abas[8]:
+with abas[9]:
     bt = R.get("backtest")
     st.subheader("🧪 E se você tivesse seguido o sistema nos últimos 5 anos?")
     if not bt:
@@ -843,7 +970,7 @@ with abas[8]:
             st.dataframe(bt["compras"].iloc[::-1], hide_index=True, width="stretch")
 
 # ======================================================================= ALERTAS
-with abas[9]:
+with abas[10]:
     if not R["alertas"]:
         st.success("Nenhum alerta hoje.")
     icones = {"Oportunidade": "🟢", "Queda forte": "📉", "Provento": "💰", "Data-com": "📅", "Ranking": "🏆",
@@ -855,7 +982,7 @@ with abas[9]:
             (st.warning if a["nivel"] == 1 else st.info)(md(f"{icones.get(a['tipo'], '•')} **{a['tipo']}** — {a['texto']}"))
 
 # ======================================================================= COMO FUNCIONA
-with abas[10]:
+with abas[11]:
     st.markdown("""
 ### De onde vêm os dados (todos reais e atualizados a cada apuração)
 - **Cotações, proventos (dividendos + JCP) e balanço**: Yahoo Finance. A data da última cotação aparece no topo.

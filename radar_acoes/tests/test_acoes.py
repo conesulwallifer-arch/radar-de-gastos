@@ -379,3 +379,42 @@ def test_sala_3d_tem_arquivos_e_dados(monkeypatch):
     assert '"three": "/app/static/three.module.min.js"' in h and "/app/static/sala3d.js" in h
     dados = json.loads(h.split("window.SALA_DADOS = ")[1].split(";</script>")[0])
     assert len(dados["agentes"]) == 9 and dados["pregao"] is True and dados["fita"][1][2] == 0.0  # NaN vira 0
+
+
+# ---------------------------------------------------------------- mercado ao vivo
+from acoes import aovivo  # noqa: E402
+
+
+def _yf_lote(series: dict, tz="America/Sao_Paulo") -> pd.DataFrame:
+    """Imita o formato do yf.download(..., group_by='ticker'): colunas (símbolo, campo), índice com fuso."""
+    partes = {}
+    for sym, s in series.items():
+        s = s.copy()
+        s.index = s.index.tz_localize(tz)
+        partes[(sym, "Close")] = s
+        partes[(sym, "Open")] = s
+    return pd.DataFrame(partes)
+
+
+def test_mercado_ao_vivo_variacao_do_dia():
+    ontem = pd.date_range("2026-10-26 10:00", periods=84, freq="5min")
+    hoje = pd.date_range("2026-10-27 10:00", periods=30, freq="5min")
+    intra = _yf_lote({
+        "SOBE3.SA": pd.Series([10.0] * 84 + list(np.linspace(10.1, 11.0, 30)), index=ontem.append(hoje)),
+        "CAI3.SA": pd.Series([20.0] * 84 + list(np.linspace(19.9, 19.0, 30)), index=ontem.append(hoje)),
+        "^BVSP": pd.Series([130000.0] * 84 + [131300.0] * 30, index=ontem.append(hoje)),
+    })
+    dias = pd.DatetimeIndex(["2026-10-23", "2026-10-26", "2026-10-27"])
+    diario = _yf_lote({"SOBE3.SA": pd.Series([9.0, 10.0, 11.0], index=dias),
+                       "CAI3.SA": pd.Series([21.0, 20.0, 19.0], index=dias),
+                       "^BVSP": pd.Series([129000.0, 130000.0, 131300.0], index=dias)})
+    sims = ["SOBE3.SA", "CAI3.SA", "^BVSP"]
+    df = aovivo.resumir(aovivo._colunas(intra, sims), aovivo._colunas(diario, sims)).set_index("ticker")
+    assert df.loc["SOBE3", "var_dia"] == pytest.approx(0.10) and df.loc["CAI3", "var_dia"] == pytest.approx(-0.05)
+    assert df.loc["^BVSP", "var_dia"] == pytest.approx(0.01)
+    assert len(df.loc["SOBE3", "grafico"]) == 30 and df.loc["SOBE3", "maxima"] == pytest.approx(11.0)
+    assert str(df.loc["SOBE3", "pregao"]) == "2026-10-27"
+    assert aovivo.placar(df.drop(index="^BVSP")) == {"sobem": 1, "caem": 1, "estaveis": 0}
+    # sem o diário, usa a última cotação de ontem como referência
+    so_intra = aovivo.resumir(aovivo._colunas(intra, sims), {}).set_index("ticker")
+    assert so_intra.loc["CAI3", "var_dia"] == pytest.approx(-0.05)

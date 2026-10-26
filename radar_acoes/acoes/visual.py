@@ -510,7 +510,6 @@ def sala_ilustrada(mesas: list[dict], pregao: bool, hora: int) -> None:
 def sala_3d(mesas: list[dict], pregao: bool, hora: int, fita_itens: list[tuple], altura: int = 620) -> None:
     """Sala dos Agentes em 3D (Three.js, servido localmente por /app/static). Gira sozinha; arraste para olhar em volta."""
     import json
-    import streamlit.components.v1 as components
     dados = {
         "pregao": bool(pregao), "hora": int(hora),
         "fita": [[t, round(float(p), 2), round(float(v), 4) if v == v else 0.0] for t, p, v in fita_itens[:16]],
@@ -534,4 +533,8 @@ def sala_3d(mesas: list[dict], pregao: bool, hora: int, fita_itens: list[tuple],
                            '(de dentro da pasta radar_acoes) ou use a visão 2D.';
   }}, 9000);
 </script>"""
-    components.html(pagina, height=altura + 4)
+    if hasattr(st, "iframe"):  # Streamlit novo: components.html foi aposentado
+        st.iframe(pagina, height=altura + 4)
+    else:
+        import streamlit.components.v1 as components
+        components.html(pagina, height=altura + 4)
