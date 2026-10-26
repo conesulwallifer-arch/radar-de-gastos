@@ -6,4 +6,5 @@ for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8501 " ^| findstr LISTENING
   set ACHOU=1
 )
 if "%ACHOU%"=="1" (echo Painel desligado.) else (echo O painel ja estava desligado.)
-timeout /t 3 >nul
+timeout /t 3 >nul 2>&1
+exit /b 0
