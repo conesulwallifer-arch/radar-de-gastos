@@ -13,7 +13,7 @@ End Function
 
 If Not PainelLigado() Then
   If Not fso.FolderExists(pasta & "\dados_acoes") Then fso.CreateFolder(pasta & "\dados_acoes")
-  sh.Run "cmd /c python -m streamlit run app.py --server.port 8501 --server.headless true > dados_acoes\painel.log 2>&1", 0, False
+  sh.Run "cmd /c set PYTHONUTF8=1&& set PYTHONIOENCODING=utf-8&& python -m streamlit run app.py --server.port 8501 --server.headless true > dados_acoes\painel.log 2>&1", 0, False
   For i = 1 To 40
     WScript.Sleep 1000
     If PainelLigado() Then Exit For
