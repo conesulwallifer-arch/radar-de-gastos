@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import threading
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -56,12 +57,24 @@ def carregar(_marca: float) -> dict | None:
         return pickle.load(f)
 
 
+@st.cache_resource
+def _trava_apuracao() -> threading.Lock:
+    return threading.Lock()  # uma só para o painel inteiro (todas as abas do navegador)
+
+
 def rodar(demo: bool):
     """Roda a apuração mostrando, ao vivo, cada etapa e cada agente trabalhando."""
-    with st.status("🪙 AURUM convocou a equipe. Acompanhe o trabalho ao vivo...", expanded=True) as caixa:
-        apurar(universo.tickers(), plano.ler()["aporte_mensal"], usar_demo=demo, enviar=False,
-               progresso=lambda m: caixa.write(md(m)))
-        caixa.update(label="✅ Apuração concluída — equipe dispensada.", state="complete")
+    trava = _trava_apuracao()
+    if not trava.acquire(blocking=False):
+        st.warning("⏳ Já tem uma apuração em andamento (em outra aba ou clique). Aguarde ela terminar e atualize a página.")
+        return
+    try:
+        with st.status("🪙 AURUM convocou a equipe. Acompanhe o trabalho ao vivo...", expanded=True) as caixa:
+            apurar(universo.tickers(), plano.ler()["aporte_mensal"], usar_demo=demo, enviar=False,
+                   progresso=lambda m: caixa.write(md(m)))
+            caixa.update(label="✅ Apuração concluída — equipe dispensada.", state="complete")
+    finally:
+        trava.release()
     st.cache_data.clear()
     st.rerun()
 

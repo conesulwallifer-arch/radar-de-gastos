@@ -9,6 +9,10 @@ O painel só lê — por isso dá para ver a equipe trabalhando mesmo que o pain
 from __future__ import annotations
 
 import json
+import os
+import threading
+import time
+import uuid
 from datetime import datetime
 
 from . import DADOS
@@ -37,19 +41,36 @@ def _agora() -> str:
 def ler_status() -> dict:
     try:
         return json.loads(STATUS.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return {}
 
 
+_TRAVA = threading.Lock()
+
+
 def status(agentes: str | list[str], estado: str, tarefa: str) -> None:
-    """estado: 'trabalhando' | 'vigiando' | 'pausa' | 'erro'."""
-    atual = ler_status()
-    for a in [agentes] if isinstance(agentes, str) else agentes:
-        atual[a] = {"estado": estado, "tarefa": tarefa, "desde": _agora()}
-    STATUS.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATUS.with_suffix(".tmp")
-    tmp.write_text(json.dumps(atual, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(STATUS)  # troca atômica: o painel nunca lê o arquivo pela metade
+    """estado: 'trabalhando' | 'vigiando' | 'pausa' | 'erro'.
+
+    O status é só para mostrar a equipe no painel: se não der para gravar (outro processo escrevendo ao mesmo
+    tempo, antivírus segurando o arquivo no Windows...), tenta de novo e, em último caso, desiste em silêncio —
+    nunca derruba a apuração."""
+    with _TRAVA:
+        for tentativa in range(5):
+            tmp = STATUS.with_name(f"{STATUS.stem}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")  # nome único por escrita
+            try:
+                atual = ler_status()
+                for a in [agentes] if isinstance(agentes, str) else agentes:
+                    atual[a] = {"estado": estado, "tarefa": tarefa, "desde": _agora()}
+                STATUS.parent.mkdir(parents=True, exist_ok=True)
+                tmp.write_text(json.dumps(atual, ensure_ascii=False, indent=1), encoding="utf-8")
+                os.replace(tmp, STATUS)  # troca atômica: o painel nunca lê o arquivo pela metade
+                return
+            except OSError:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                time.sleep(0.05 * (tentativa + 1))
 
 
 def todos_em_pausa(proxima: str) -> None:
@@ -59,15 +80,18 @@ def todos_em_pausa(proxima: str) -> None:
 def registrar(agente: str, texto: str) -> None:
     if SILENCIOSO:
         return
-    DIARIO.parent.mkdir(parents=True, exist_ok=True)
-    with open(DIARIO, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"quando": _agora(), "agente": agente, "texto": texto[:400]}, ensure_ascii=False) + "\n")
+    try:
+        DIARIO.parent.mkdir(parents=True, exist_ok=True)
+        with _TRAVA, open(DIARIO, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"quando": _agora(), "agente": agente, "texto": texto[:400]}, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # o diário é registro; falhar aqui não pode parar o trabalho
 
 
 def ler_diario(n: int = 80) -> list[dict]:
     try:
         linhas = DIARIO.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
+    except OSError:
         return []
     saida = []
     for l in linhas[-n:]:
@@ -81,5 +105,5 @@ def ler_diario(n: int = 80) -> list[dict]:
 def dias_trabalhados() -> int:
     try:
         return len({json.loads(l)["quando"][:10] for l in DIARIO.read_text(encoding="utf-8").splitlines() if l.strip()})
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+    except (OSError, ValueError, KeyError):
         return 0
