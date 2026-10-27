@@ -176,8 +176,7 @@ def _apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fal
     prev_cal, fator = _seguro("Íris (calibragem)", lambda: previsor.calibrar(prev_cp, validacao), (pd.DataFrame(), 0.0))
     if len(prev_cp) and len(prev_cal):
         if not usar_demo:  # dados fictícios nunca entram no placar real
-            previsor.registrar(prev_cp.assign(direcao=prev_cp["prob_alta"].map(previsor.direcao)),
-                               dict(zip(rk["ticker"], rk["preco"])), hoje)
+            previsor.registrar(prev_cal, dict(zip(rk["ticker"], rk["preco"])), hoje)  # o que você vê (já calibrado) é o que é conferido
         rk = rk.merge(prev_cal[["ticker", "prob_alta", "prob_bruta", "direcao", "ret_mediano", "ret_p10", "ret_p90"]]
                       .rename(columns={"prob_alta": "prob_alta_1m", "prob_bruta": "prob_alta_1m_bruta", "direcao": "direcao_1m",
                                        "ret_mediano": "ret_mediano_1m", "ret_p10": "ret_p10_1m", "ret_p90": "ret_p90_1m"}),

@@ -412,7 +412,7 @@ with abas[2]:
              ("vota (padrão real, t = " + f"{ps.get('t_stat', 0):.1f})".replace(".", ",")) if ps.get("fator", 0) > 0 else "não vota (não provou vantagem)",
              "ok" if ps.get("fator", 0) > 0 else "alerta"),
             ("🔮 ÍRIS · 1 MÊS", pct(val_iris.get("acerto"), 1) if val_iris.get("n") else "—",
-             f"chute 'sempre sobe' = {pct(val_iris.get('chute_alta'), 1)}", "ok" if pv_iris.get("fator", 0) > 0 else "alerta"),
+             f"melhor chute = {pct(val_iris.get('base_direcional', val_iris.get('chute_alta')), 1)}", "ok" if pv_iris.get("fator", 0) > 0 else "alerta"),
             ("🧠 EQUIPE · PLACAR REAL", pct(float(eq["acerto"].iloc[0]), 0) if len(eq) else "—",
              f"{int(eq['conferidos'].iloc[0])} decisões conferidas 3 meses depois" if len(eq) else "começa a contar 3 meses após a 1ª apuração real", ""),
         ])
@@ -499,7 +499,7 @@ with abas[3]:
         visual.cartoes([
             ("PADRÕES APROVADOS", f"{len(ap)} de {len(pad)}", "venceram o chute nos 2 períodos", "ok" if len(ap) else "alerta"),
             ("SINAIS HOJE", str(int((sin["status"] == "✅ Aprovado").sum())) if len(sin) else "0",
-             f"+ {int((sin['status'] != '✅ Aprovado').sum()) if len(sin) else 0} em observação", ""),
+             f"{int((pad['status'] == '👀 Em observação').sum())} padrão(ões) em observação (não geram sinal)", ""),
             ("CHUTE (DIA ALEATÓRIO)", pct(ch.get("acerto"), 0), f"ganha em média {pct(ch.get('expectativa'), 1)} por operação", ""),
             ("PLACAR REAL DOS SINAIS", pct(pr.get("acerto"), 0) if pr.get("n") else "—",
              f"{pr.get('n', 0)} encerrados · {pr.get('abertos', 0)} em andamento" if pr.get("n") or pr.get("abertos") else "começa a contar com os sinais de hoje", ""),

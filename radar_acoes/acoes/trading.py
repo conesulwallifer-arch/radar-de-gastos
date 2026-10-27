@@ -129,10 +129,12 @@ def operacoes_historicas(ticker: str, df: pd.DataFrame, g: pd.DataFrame) -> list
         for i in idx:
             if i < livre or i < 260 or not np.isfinite(osc[i]):
                 continue
-            r = simular(p, i, osc[i])
+            if i + 1 >= len(p):
+                continue
+            r = simular(p, i + 1, osc[i])  # entra no fechamento do DIA SEGUINTE: o sinal só é conhecido depois do fechamento
             if r is None:
                 continue
-            saida.append({"ticker": ticker, "padrao": nome, "data": df.index[i], "dias": r["saida"] - i, **r})
+            saida.append({"ticker": ticker, "padrao": nome, "data": df.index[i], "dias": r["saida"] - i - 1, **r})
             livre = r["saida"] + 1  # uma operação por vez em cada padrão/ação
     return saida
 
@@ -142,11 +144,11 @@ def _base_aleatoria(ticker: str, df: pd.DataFrame, passo: int = 10) -> list[dict
     p = df["p"].to_numpy(dtype=float)
     osc = df["osc"].to_numpy(dtype=float)
     out = []
-    for i in range(260, len(p) - 1, passo):
+    for i in range(260, len(p) - 2, passo):
         if np.isfinite(osc[i]):
-            r = simular(p, i, osc[i])
+            r = simular(p, i + 1, osc[i])  # mesma regra de entrada dos padrões (comparação justa)
             if r:
-                out.append({"ticker": ticker, "padrao": "chute", "data": df.index[i], "dias": r["saida"] - i, **r})
+                out.append({"ticker": ticker, "padrao": "chute", "data": df.index[i], "dias": r["saida"] - i - 1, **r})
     return out
 
 
@@ -160,6 +162,23 @@ def _estatisticas(t: pd.DataFrame) -> dict:
             "fator_lucro": float(ganhos.sum() / -perdas.sum()) if len(perdas) and perdas.sum() < 0 else float("inf"),
             "dias_medio": float(t["dias"].mean()), "t": float(r.mean() / (r.std(ddof=1) / np.sqrt(len(r)))) if len(r) > 2 and r.std() > 0 else 0.0,
             "alvos": float((t["motivo"] == "alvo").mean()), "stops": float((t["motivo"] == "stop").mean())}
+
+
+def _t_dif(o: pd.DataFrame, b: pd.DataFrame) -> float:
+    """Vantagem do padrão sobre o chute, em erros-padrão. Agrupa por MÊS de entrada: operações do mesmo mês andam juntas
+    com o mercado e não são independentes (contar cada uma como independente inflava a confiança)."""
+    if len(o) < 3 or len(b) < 3:
+        return 0.0
+    om = o.groupby(pd.to_datetime(o["data"]).dt.to_period("M"))["ret"].mean()
+    bm = b.groupby(pd.to_datetime(b["data"]).dt.to_period("M"))["ret"].mean()
+    if len(om) < 3 or len(bm) < 3:
+        return 0.0
+    ep = np.sqrt(om.var(ddof=1) / len(om) + bm.var(ddof=1) / len(bm))
+    return float((o["ret"].mean() - b["ret"].mean()) / ep) if ep > 0 else 0.0
+
+
+T_CONFIRMACAO = 2.33  # ~1% de chance de ser sorte, já corrigido por testar 5 padrões ao mesmo tempo
+T_DESCOBERTA = 1.65   # e também precisa ter vencido o chute no período antigo
 
 
 def backtest(precos: dict[str, pd.Series], proventos: dict[str, pd.Series]) -> dict:
@@ -177,26 +196,27 @@ def backtest(precos: dict[str, pd.Series], proventos: dict[str, pd.Series]) -> d
     if ops.empty or base.empty:
         return {"padroes": pd.DataFrame(), "operacoes": ops, "ind": ind, "chute": {}}
     corte = max(ops["data"].max(), base["data"].max()) - pd.DateOffset(years=ANOS_CONFIRMACAO)
-    chute_conf = _estatisticas(base[base["data"] > corte])
+    base_conf, base_desc = base[base["data"] > corte], base[base["data"] <= corte]
+    chute_conf = _estatisticas(base_conf)
     linhas = []
     for nome, (titulo, _) in PADROES.items():
         o = ops[ops["padrao"] == nome]
         desc, conf = _estatisticas(o[o["data"] <= corte]), _estatisticas(o[o["data"] > corte])
         tudo = _estatisticas(o)
-        oc = o[o["data"] > corte]["ret"]
-        # vantagem sobre o chute, medida em "erros-padrão": ≥ 1,5 = difícil ser só sorte
-        t_chute = (float((oc.mean() - chute_conf.get("expectativa", 0)) / (oc.std(ddof=1) / np.sqrt(len(oc))))
-                   if len(oc) > 2 and oc.std() > 0 else 0.0)
+        t_chute = _t_dif(o[o["data"] > corte], base_conf)
+        t_desc = _t_dif(o[o["data"] <= corte], base_desc)
         aprovado = (conf.get("n", 0) >= MIN_TRADES_CONF and desc.get("n", 0) >= MIN_TRADES_CONF
-                    and conf["expectativa"] > 0 and desc["expectativa"] > 0 and t_chute >= 1.5)
+                    and conf["expectativa"] > 0 and desc["expectativa"] > 0
+                    and t_chute >= T_CONFIRMACAO and t_desc >= T_DESCOBERTA)
+        # em observação: venceu o chute nos dois períodos, mas sem folga suficiente. NÃO gera sinal — só fica no placar.
         observacao = (not aprovado and conf.get("n", 0) >= 10 and conf.get("expectativa", -1) > 0
-                      and conf["expectativa"] > chute_conf.get("expectativa", 0))
+                      and t_chute >= T_DESCOBERTA and t_desc >= 1.0)
         linhas.append({"padrao": nome, "nome": titulo,
                        "status": "✅ Aprovado" if aprovado else "👀 Em observação" if observacao else "❌ Reprovado",
                        **{f"{k}_conf": v for k, v in conf.items()}, **{f"{k}_desc": v for k, v in desc.items()},
                        **{f"{k}_total": v for k, v in tudo.items()},
                        "vantagem_vs_chute": conf.get("expectativa", np.nan) - chute_conf.get("expectativa", np.nan),
-                       "t_vs_chute": t_chute})
+                       "t_vs_chute": t_chute, "t_vs_chute_desc": t_desc})
     tab = pd.DataFrame(linhas)
     ordem = {"✅ Aprovado": 0, "👀 Em observação": 1, "❌ Reprovado": 2}
     tab = tab.sort_values(["status", "expectativa_conf"], key=lambda c: c.map(ordem) if c.name == "status" else -c).reset_index(drop=True)
@@ -215,7 +235,7 @@ def sinais_hoje(bt: dict, rk: pd.DataFrame, dias: int = 3) -> pd.DataFrame:
             continue
         ult = df.iloc[-1]
         for nome in PADROES:
-            if nome not in pad.index or pad.loc[nome, "status"] == "❌ Reprovado":
+            if nome not in pad.index or pad.loc[nome, "status"] != "✅ Aprovado":  # só padrão aprovado vira sinal
                 continue
             rec = g[nome].iloc[-dias:]
             if not rec.any():
@@ -254,10 +274,14 @@ def sinais_hoje(bt: dict, rk: pd.DataFrame, dias: int = 3) -> pd.DataFrame:
 def registrar(sinais: pd.DataFrame, hoje: date) -> None:
     if sinais is None or sinais.empty:
         return
-    novo = sinais[["ticker", "padrao", "preco", "stop", "alvo"]].assign(data=hoje.isoformat())
+    novo = sinais[["ticker", "padrao", "preco", "stop", "alvo", "data_sinal"]].assign(data=hoje.isoformat())
+    novo["data_sinal"] = novo["data_sinal"].astype(str)
     try:
-        antigo = pd.read_csv(REGISTRO)
-        novo = pd.concat([antigo, novo], ignore_index=True).drop_duplicates(["data", "ticker", "padrao"], keep="first")
+        antigo = pd.read_csv(REGISTRO, dtype={"data_sinal": str})
+        if "data_sinal" not in antigo:
+            antigo["data_sinal"] = antigo["data"]
+        # o sinal vale por até 3 pregões: registra uma vez só (a primeira, que é a entrada que valeria)
+        novo = pd.concat([antigo, novo], ignore_index=True).drop_duplicates(["ticker", "padrao", "data_sinal"], keep="first")
     except (FileNotFoundError, pd.errors.EmptyDataError):
         pass
     REGISTRO.parent.mkdir(parents=True, exist_ok=True)
@@ -278,10 +302,7 @@ def placar_real(precos: dict[str, pd.Series]) -> dict:
         depois = s[s.index > pd.Timestamp(r["data"])].dropna()
         entrada, stop, alvo = float(r["preco"]), float(r["stop"]), float(r["alvo"])
         risco, res = entrada - stop, None
-        for k, (d, v) in enumerate(depois.items()):
-            if k >= PRAZO:
-                res = (d, v / entrada - 1 - CUSTO, "prazo")
-                break
+        for k, (d, v) in enumerate(depois.items()):  # mesmas regras do teste: alvo/stop, e saída no 63º pregão
             if v >= entrada + risco and stop < entrada:
                 stop = entrada
             if v >= alvo:
@@ -290,8 +311,11 @@ def placar_real(precos: dict[str, pd.Series]) -> dict:
             if v <= stop:
                 res = (d, v / entrada - 1 - CUSTO, "stop" if stop < entrada else "empate")
                 break
+            if k == PRAZO - 1:
+                res = (d, v / entrada - 1 - CUSTO, "prazo")
+                break
         linhas.append({**r.to_dict(), "resultado": res[2] if res else "aberto", "retorno": res[1] if res else
-                       (float(depois.iloc[-1]) / entrada - 1 if len(depois) else 0.0), "fechou_em": res[0].date() if res else None})
+                       (float(depois.iloc[-1]) / entrada - 1 - CUSTO if len(depois) else 0.0), "fechou_em": res[0].date() if res else None})
     t = pd.DataFrame(linhas)
     if t.empty:
         return {"n": 0, "abertos": 0, "tabela": t}

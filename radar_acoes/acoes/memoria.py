@@ -72,9 +72,14 @@ def avaliar(precos: dict, proventos: dict) -> dict:
     m = m[m["voto"] != 0]
     linhas = []
     for a, g in m.groupby("agente"):
-        acertou = np.sign(g["voto"]) == np.sign(g["excesso"])
+        acertou = (np.sign(g["voto"]) == np.sign(g["excesso"])).astype(float)
         fav, contra = g[g["voto"] > 0], g[g["voto"] < 0]
+        # votos de dias seguidos são conferidos em janelas de 3 meses que se sobrepõem: o mês é a unidade, não o voto
+        por_mes = acertou.groupby(pd.to_datetime(g["data"]).dt.to_period("M")).mean()
+        n_ef = max(len(por_mes) / 3, 1.0)
+        ep = float(por_mes.std(ddof=1) / np.sqrt(n_ef)) if len(por_mes) > 2 else np.nan
         linhas.append({"agente": a, "conferidos": int(len(g)), "acerto": float(acertou.mean()),
+                       "meses": int(len(por_mes)), "erro_padrao": ep,
                        "ganho_a_favor": float(fav["excesso"].mean()) if len(fav) else np.nan,
                        "ganho_contra": float(contra["excesso"].mean()) if len(contra) else np.nan})
     return {**base, "por_agente": pd.DataFrame(linhas)}
@@ -87,6 +92,10 @@ def fatores(aval: dict) -> dict[str, float]:
         return {}
     out = {}
     for _, r in df.iterrows():
-        if r["conferidos"] >= AMOSTRA_MINIMA:
-            out[r["agente"]] = float(np.clip(1 + (r["acerto"] - 0.5) * 4, 0.5, 1.5))
+        ep, meses = r.get("erro_padrao"), r.get("meses", 0)
+        if r["conferidos"] < AMOSTRA_MINIMA or not meses or meses < 6 or ep != ep:
+            continue  # pouca história: peso continua 1 (não "aprende" com sorte)
+        d = r["acerto"] - 0.5
+        firme = np.sign(d) * max(abs(d) - 2 * ep, 0.0)  # só a parte do acerto/erro que passa da margem de erro
+        out[r["agente"]] = float(np.clip(1 + firme * 4, 0.5, 1.5))
     return out

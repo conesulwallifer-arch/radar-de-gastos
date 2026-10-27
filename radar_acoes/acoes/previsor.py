@@ -117,7 +117,16 @@ def resumo_acertos(df: pd.DataFrame) -> dict:
     a = dirc[dirc["dir"] == "Alta"]
     q = dirc[dirc["dir"] == "Queda"]
     taxa_sobe = d["subiu"].mean()
+    # base justa: no MESMO subconjunto em que ela opinou, o melhor dos dois chutes ("sempre sobe" ou "sempre cai")
+    sobe_dir = dirc["subiu"].mean() if len(dirc) else np.nan
+    base_dir = max(sobe_dir, 1 - sobe_dir) if sobe_dir == sobe_dir else np.nan
+    ep = np.nan
+    if len(dirc) and "data" in dirc:  # erro-padrão por mês: previsões do mesmo dia andam juntas (não são independentes)
+        acertos = ((dirc["dir"] == "Alta") == dirc["subiu"]).astype(float)
+        por_mes = acertos.groupby(pd.to_datetime(dirc["data"]).dt.to_period("M")).mean()
+        ep = float(por_mes.std(ddof=1) / np.sqrt(len(por_mes))) if len(por_mes) > 2 else np.nan
     return {
+        "base_direcional": float(base_dir) if base_dir == base_dir else np.nan, "erro_padrao": ep,
         "n": int(len(d)), "n_direcionais": int(len(dirc)), "acerto": float(acerto),
         "acerto_alta": float(a["subiu"].mean()) if len(a) else float("nan"),
         "acerto_queda": float((~q["subiu"]).mean()) if len(q) else float("nan"),
@@ -170,11 +179,11 @@ def calibrar(prev: pd.DataFrame, validacao: dict) -> tuple[pd.DataFrame, float]:
     fator 0 = não bateu o chute (todas as previsões viram 'Indefinida'); 1 = vantagem de 5+ pontos sobre o chute."""
     if prev is None or prev.empty:
         return prev, 0.0
-    ac, chute = validacao.get("acerto"), validacao.get("chute_alta")
-    if ac != ac or chute != chute or validacao.get("n_direcionais", 0) < 100:
+    ac, base, ep = validacao.get("acerto"), validacao.get("base_direcional"), validacao.get("erro_padrao")
+    if ac is None or base is None or ep is None or ac != ac or base != base or ep != ep or validacao.get("n_direcionais", 0) < 100:
         fator = 0.0
-    else:
-        fator = float(np.clip((ac - max(chute, 0.5)) / 0.05, 0.0, 1.0))
+    else:  # precisa vencer o melhor chute por mais de 2 erros-padrão (senão pode ser sorte)
+        fator = float(np.clip((ac - base - 2 * ep) / 0.05, 0.0, 1.0))
     p = prev.copy()
     p["prob_bruta"] = p["prob_alta"]
     p["prob_alta"] = p["base"] + (p["prob_alta"] - p["base"]) * fator

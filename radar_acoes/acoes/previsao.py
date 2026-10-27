@@ -20,7 +20,7 @@ Z90 = 1.2815515655446004
 
 def proventos_12m(i: dict, hoje: pd.Timestamp | None = None) -> dict:
     hoje = hoje or pd.Timestamp(date.today())
-    base = i.get("proventos_media_3a") or i.get("proventos_12m") or 0.0
+    base = next((float(v) for v in (i.get("proventos_media_3a"), i.get("proventos_12m")) if v is not None and v == v and v > 0), 0.0)
     g = i.get("cresc_proventos_5a")
     g = 0.0 if g is None or g != g else max(-0.10, min(0.10, g))
     previsto = base * (1 + g)
@@ -53,8 +53,8 @@ def tendencia(precos: pd.Series, dy: float) -> tuple[float, float]:
 
 def faixa_preco(preco: float, mu: float, vol: float, anos: float) -> dict:
     """Quantis 10/50/90% do preço daqui a `anos` (log-normal, mediana = preço × (1+mu)^anos)."""
-    m = math.log(1 + mu) * anos
     s = vol * math.sqrt(anos)
+    m = (math.log(1 + mu) - vol ** 2 / 2) * anos  # mu é retorno MÉDIO; a mediana (o "meio" das possibilidades) fica abaixo dele
     return {"pessimista": preco * math.exp(m - Z90 * s), "mediana": preco * math.exp(m),
             "otimista": preco * math.exp(m + Z90 * s)}
 

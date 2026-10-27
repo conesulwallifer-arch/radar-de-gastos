@@ -58,7 +58,8 @@ def test_sinais():
 def test_previsao_e_simulador():
     f = previsao.faixa_preco(100, 0.05, 0.3, 1)
     assert f["pessimista"] < f["mediana"] < f["otimista"]
-    assert f["mediana"] == pytest.approx(105)
+    # a MÉDIA continua 105 (retorno esperado de 5%); a mediana fica abaixo por causa da oscilação
+    assert f["mediana"] * np.exp(0.3 ** 2 / 2) == pytest.approx(105) and f["mediana"] < 105
     s = previsao.simular_aportes(1000, 2, dy=0, valorizacao=0)
     assert s["patrimonio"].iloc[-1] == pytest.approx(24000)
     s = previsao.simular_aportes(1000, 10, dy=0.08, valorizacao=0.03)
@@ -201,19 +202,23 @@ def test_mesa_vota_veta_e_confere():
 
 def test_memoria_aprende_com_o_placar(tmp_path, monkeypatch):
     monkeypatch.setattr(memoria, "ARQ", tmp_path / "mem.csv")
-    dias = pd.bdate_range("2025-01-01", periods=200)
-    sobe = pd.Series(np.linspace(10, 14, 200), index=dias)
-    cai = pd.Series(np.linspace(10, 7, 200), index=dias)
+    monkeypatch.setattr(memoria, "AMOSTRA_MINIMA", 10)
+    dias = pd.bdate_range("2025-01-01", periods=420)
+    sobe = pd.Series(np.linspace(10, 14, 420), index=dias)
+    cai = pd.Series(np.linspace(10, 7, 420), index=dias)
     precos = {"SOBE3": sobe, "CAI3": cai}
-    # agente "bom" votou certo, agente "ruim" votou errado, em 20 dias diferentes
+    ops = {"SOBE3": {"bom": {"voto": 1}, "ruim": {"voto": -1}}, "CAI3": {"bom": {"voto": -1}, "ruim": {"voto": 1}}}
+    # 20 dias seguidos (um mês só): é pouca história — o peso NÃO pode mudar (antes mudava e "aprendia" com sorte)
     for d in dias[:20]:
-        ops = {"SOBE3": {"bom": {"voto": 1}, "ruim": {"voto": -1}}, "CAI3": {"bom": {"voto": -1}, "ruim": {"voto": 1}}}
         memoria.registrar(ops, {"SOBE3": float(sobe[d]), "CAI3": float(cai[d])}, d.date())
     av = memoria.avaliar(precos, {})
     pa = av["por_agente"].set_index("agente")
     assert pa.loc["bom", "acerto"] == 1.0 and pa.loc["ruim", "acerto"] == 0.0
-    monkeypatch.setattr(memoria, "AMOSTRA_MINIMA", 10)
-    f = memoria.fatores(av)
+    assert memoria.fatores(av) == {}
+    # acerto consistente ao longo de ~9 meses: aí sim o peso muda
+    for d in dias[20:340:15]:
+        memoria.registrar(ops, {"SOBE3": float(sobe[d]), "CAI3": float(cai[d])}, d.date())
+    f = memoria.fatores(memoria.avaliar(precos, {}))
     assert f["bom"] == 1.5 and f["ruim"] == 0.5
 
 

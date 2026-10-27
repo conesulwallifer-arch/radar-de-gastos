@@ -97,11 +97,12 @@ def rodar(base: dict[str, dict], anos: int = 5, aporte: float = 1000.0, n_acoes:
         if ibov is not None and len(ibov[ibov.index <= dia]):
             cotas_ibov += aporte / float(ibov[ibov.index <= dia].iloc[-1])
         escolha = _escolher_no_mes(base, dia, n_acoes, max_setor)
+        precos_dia = {t: float(base[t]["precos"].asof(dia)) for t in escolha}
+        escolha = [t for t in escolha if precos_dia[t] > 0]  # preço ausente/zero: fica de fora (o dinheiro vai para as outras)
         if escolha:
             parte = caixa / len(escolha)
             for t in escolha:
-                preco = float(base[t]["precos"].asof(dia))
-                cotas[t] = cotas.get(t, 0.0) + parte / preco
+                cotas[t] = cotas.get(t, 0.0) + parte / precos_dia[t]
             compras.append({"mes": dia.date(), "acoes": ", ".join(escolha)})
             caixa = 0.0
         fluxos.append(-aporte)

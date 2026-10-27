@@ -113,7 +113,9 @@ cruzamento dourado e **queda forte + virada**.
 - **Regras de saída iguais para todos:** stop a ~1 mês de oscilação normal (5% a 18%), alvo a 2× o risco, stop vai para a entrada
   quando o ganho cobre o risco, saída por tempo em 3 meses; custos descontados.
 - **Teste honesto:** dois períodos separados (antigo e últimos 3 anos) e comparação com o *chute* (entrar em dias aleatórios com as
-  mesmas saídas). ✅ Aprovado só se ganhou nos dois períodos e venceu o chute com folga estatística (t ≥ 1,5).
+  mesmas saídas). ✅ Aprovado só se ganhou nos dois períodos e venceu o chute com folga estatística (t ≥ 2,33 nos últimos 3 anos e ≥ 1,65 no
+  período antigo, com operações agrupadas por mês e correção por testar 5 padrões). Entrada no fechamento do dia seguinte ao sinal.
+  Só padrão aprovado gera sinal; "em observação" fica só no placar. Medido: 0 aprovações em 40 simulações de mercado aleatório.
 - **Sinais de hoje** com entrada, stop, alvo, acerto do padrão e se a ação está **barata**; ações vetadas pelo Rex ficam de fora.
 - **Calculadora de posição** (arriscar 1% do capital por operação) e **Minhas operações**: o Leo acompanha e avisa no Telegram
   quando bater alvo, stop ou for hora de proteger o ganho.

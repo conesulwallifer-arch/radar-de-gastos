@@ -81,8 +81,8 @@ def otto(r: dict, prov: pd.Series, precos: pd.Series, hoje: pd.Timestamp, erros_
     acerto = float((abs(pagos["razao"] - 1) <= TOLERANCIA_PROVENTOS).mean()) if len(pagos) else np.nan
     erro_med = float(abs(pagos["razao"] - 1).median()) if len(pagos) else np.nan
     razoes = pagos["razao"].dropna().to_numpy()
-    if len(razoes) < 4 and erros_gerais is not None and len(erros_gerais):
-        razoes = np.concatenate([razoes, erros_gerais])
+    if len(razoes) < 8 and erros_gerais is not None and len(erros_gerais):
+        razoes = np.concatenate([razoes, erros_gerais])  # poucos anos da ação: a faixa usa também o erro típico de todas
     p10, p90 = (np.quantile(razoes, [0.10, 0.90]) if len(razoes) >= 3 else (np.nan, np.nan))
     # chance de corte: histórico da própria ação (puxado para a taxa típica) × sinais de alerta de hoje
     anual = _por_ano(prov, precos, hoje)
@@ -248,7 +248,6 @@ def _painel(precos: dict[str, pd.Series], proventos: dict[str, pd.Series]) -> pd
     if not partes:
         return pd.DataFrame()
     d = pd.concat(partes, ignore_index=True).dropna(subset=COLS)
-    d[COLS] = d[COLS].clip(d[COLS].quantile(0.01), d[COLS].quantile(0.99), axis=1)
     # alvo: render MAIS que a mediana das outras ações no mesmo mês (o que importa para escolher o que comprar)
     med = d.groupby("mes")["ret_fut"].transform("median")
     d["alvo"] = np.where(d["ret_fut"].notna(), (d["ret_fut"] > med).astype(float), np.nan)
@@ -257,8 +256,11 @@ def _painel(precos: dict[str, pd.Series], proventos: dict[str, pd.Series]) -> pd
 
 
 def _padronizar(treino: pd.DataFrame, *outros: pd.DataFrame):
-    mu, sd = treino[COLS].mean(), treino[COLS].std().replace(0, 1)
-    return [((x[COLS] - mu) / sd).to_numpy() for x in (treino, *outros)]
+    """Corta extremos e padroniza usando SÓ o treino (nenhuma informação do período testado entra na régua)."""
+    lo, hi = treino[COLS].quantile(0.01), treino[COLS].quantile(0.99)
+    tr = treino[COLS].clip(lo, hi, axis=1)
+    mu, sd = tr.mean(), tr.std().replace(0, 1)
+    return [((x[COLS].clip(lo, hi, axis=1) - mu) / sd).to_numpy() for x in (treino, *outros)]
 
 
 def sofia(precos: dict[str, pd.Series], proventos: dict[str, pd.Series], anos_teste: int = 3) -> dict:

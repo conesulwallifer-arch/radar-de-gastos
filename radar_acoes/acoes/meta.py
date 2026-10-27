@@ -85,8 +85,10 @@ def simular(meta: float, inicial: float, aporte: float, retorno_aa: float, volat
     })
 
     def quantil(q):
-        v = np.nanpercentile(primeiro, q) if np.isfinite(primeiro).mean() * 100 >= q else np.nan
-        return None if v != v else int(math.ceil(v))
+        # quem NÃO chegou conta como "depois do fim" (infinito). Antes o quantil era tirado só de quem chegou,
+        # e a data da meta saía anos mais cedo do que a realidade das simulações.
+        v = np.percentile(np.where(np.isnan(primeiro), meses + 1, primeiro), q, method="higher")
+        return None if v > meses else int(math.ceil(v))
 
     return {"faixas": faixas, "meses_10": quantil(10), "meses_50": quantil(50), "meses_90": quantil(90),
             "chance_total": float(np.isfinite(primeiro).mean())}
@@ -112,7 +114,7 @@ def alavancas(meta: float, inicial: float, aporte: float, retorno_aa: float, aum
 
 def fmt_tempo(meses: int | None) -> str:
     if meses is None:
-        return "não chega em 60 anos"
+        return "mais de 40 anos"  # não chega dentro do horizonte simulado
     a, m = divmod(meses, 12)
     if a == 0:
         return f"{m} meses"
