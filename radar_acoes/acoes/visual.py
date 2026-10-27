@@ -250,6 +250,7 @@ APARENCIA = {
     "proventos":   {"pele": "#E0AC69", "cabelo": "#4A3728", "estilo": "curto", "roupa": "#1F5E3A", "acessorio": "oculos"},
     "entrada":     {"pele": "#8D5524", "cabelo": "#2B1B10", "estilo": "curto", "roupa": "#7A4B1E", "acessorio": "bone"},
     "conjunto":    {"pele": "#FFDBAC", "cabelo": "#1A1A1A", "estilo": "longo", "roupa": "#234A6B", "acessorio": "oculos"},
+    "trading":     {"pele": "#F1C27D", "cabelo": "#111111", "estilo": "curto", "roupa": "#5A1E1E", "acessorio": "gravata"},
 }
 
 
@@ -315,6 +316,15 @@ def _tela(aid: str) -> str:
         return (linhas + '<circle cx="66" cy="28" r="12" fill="#234A6B" stroke="#4DA3FF"/>'
                 '<g class="sa-marcador"><text x="66" y="31" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8" fill="#E8E6E1">p</text></g>'
                 '<text x="84" y="31" font-family="IBM Plex Mono,monospace" font-size="7" fill="#00C176">52%</text>')
+    if aid == "trading":  # candles com stop e alvo
+        velas = "".join(f'<line x1="{12 + k * 12}" y1="{y - 6}" x2="{12 + k * 12}" y2="{y + h + 6}" stroke="{c}"/>'
+                        f'<rect class="sa-barra" style="animation-delay:{k * .15}s" x="{8 + k * 12}" y="{y}" width="8" height="{h}" fill="{c}"/>'
+                        for k, (y, h, c) in enumerate([(30, 8, "#FF4D4F"), (28, 6, "#00C176"), (22, 9, "#00C176"), (24, 6, "#FF4D4F"),
+                                                        (18, 8, "#00C176"), (14, 7, "#00C176"), (12, 5, "#00C176")]))
+        return (velas + '<line x1="4" y1="8" x2="92" y2="8" stroke="#00C176" stroke-dasharray="3 2"/>'
+                '<line x1="4" y1="46" x2="92" y2="46" stroke="#FF4D4F" stroke-dasharray="3 2"/>'
+                '<text x="92" y="7" text-anchor="end" font-family="IBM Plex Mono,monospace" font-size="6" fill="#00C176">ALVO</text>'
+                '<text x="92" y="53" text-anchor="end" font-family="IBM Plex Mono,monospace" font-size="6" fill="#FF4D4F">STOP</text>')
     if aid == "atlas":  # globo + lupa explorando
         return ('<circle cx="40" cy="28" r="20" fill="#1E3A5F" stroke="#4DA3FF"/>'
                 '<ellipse class="sa-meridiano" cx="40" cy="28" rx="8" ry="20" fill="none" stroke="#4DA3FF"/>'
@@ -415,7 +425,7 @@ def boneco(aid: str, estado: str) -> str:
 
 EQUIPE_NOME = {"aurum": "AURUM", "renda": "Dora", "fundamentos": "Fausto", "valuation": "Vitória", "tendencia": "Téo",
                "noticias": "Nina", "previsor": "Íris", "risco": "Rex", "atlas": "Atlas",
-               "proventos": "Otto", "entrada": "Bento", "conjunto": "Sofia"}
+               "proventos": "Otto", "entrada": "Bento", "conjunto": "Sofia", "trading": "Leo"}
 
 CSS_SALA = """
 <style>

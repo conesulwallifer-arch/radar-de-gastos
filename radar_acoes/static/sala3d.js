@@ -223,6 +223,20 @@ const TELAS = {
     ctx.globalAlpha = 1; ctx.fillStyle = '#234A6B'; ctx.beginPath(); ctx.arc(170, 72, 30, 0, 7); ctx.fill(); ctx.strokeStyle = '#4DA3FF'; ctx.stroke();
     ctx.fillStyle = '#E8E6E1'; ctx.font = '700 22px monospace'; ctx.textAlign = 'center'; ctx.fillText(`${Math.round(52 + Math.sin(t) * 3)}%`, 170, 80);
   },
+  trading(ctx, t) {
+    ctx.setLineDash([8, 6]); ctx.lineWidth = 2;
+    ctx.strokeStyle = '#00C176'; ctx.beginPath(); ctx.moveTo(8, 22); ctx.lineTo(248, 22); ctx.stroke();
+    ctx.strokeStyle = '#FF4D4F'; ctx.beginPath(); ctx.moveTo(8, 124); ctx.lineTo(248, 124); ctx.stroke(); ctx.setLineDash([]);
+    let y = 96;
+    for (let i = 0; i < 14; i++) {
+      const d = Math.sin(i * 1.7 + t * 1.2) * 10 - 3, o = y, c = y + d; y = Math.max(34, Math.min(112, c));
+      const cor = d < 0 ? '#00C176' : '#FF4D4F'; ctx.strokeStyle = cor; ctx.fillStyle = cor; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(16 + i * 17, Math.min(o, c) - 6); ctx.lineTo(16 + i * 17, Math.max(o, c) + 6); ctx.stroke();
+      ctx.fillRect(11 + i * 17, Math.min(o, c), 10, Math.max(3, Math.abs(c - o)));
+    }
+    ctx.fillStyle = '#00C176'; ctx.font = '700 14px monospace'; ctx.textAlign = 'right'; ctx.fillText('ALVO', 248, 16);
+    ctx.fillStyle = '#FF4D4F'; ctx.fillText('STOP', 248, 140);
+  },
   atlas(ctx, t) {
     ctx.fillStyle = '#1E3A5F'; ctx.beginPath(); ctx.arc(100, 72, 52, 0, 7); ctx.fill(); ctx.strokeStyle = '#4DA3FF'; ctx.lineWidth = 2; ctx.stroke();
     ctx.beginPath(); ctx.ellipse(100, 72, Math.abs(Math.cos(t)) * 52 + 2, 52, 0, 0, 7); ctx.stroke();

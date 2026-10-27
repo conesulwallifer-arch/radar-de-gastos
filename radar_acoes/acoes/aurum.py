@@ -99,6 +99,7 @@ def contexto(R: dict, pl: dict | None = None, cart: pd.DataFrame | None = None) 
         "mesa_de_analistas": ({"resumo": mesa_mod.resumo_texto(R["mesa"]), "atividade": R["mesa"]["log"]} if R.get("mesa") else None),
         "previsora_iris": _iris(R),
         "equipe_previsibilidade": _previsibilidade(R),
+        "mesa_trading": _trading(R),
         "atlas_explorador": (R.get("atlas") or {}).get("relatorio"),
         "noticias_recentes": {t: [f"{n['titulo']} ({n['fonte']}, tom {n['tom']})" for n in v[:4]]
                               for t, v in (R.get("noticias") or {}).items() if t in {x["ticker"] for _, x in rk.head(10).iterrows()}},
@@ -125,6 +126,35 @@ def _previsibilidade(R: dict) -> dict | None:
                           "ordem_50": _arred(r.get("bento_preco_50")), "sofia": _arred(r.get("sofia_prob"), 3)}
                          for _, r in alvo.iterrows()],
     }
+
+
+def _trading(R: dict) -> dict | None:
+    tr = R.get("trading") or {}
+    pad, sin = tr.get("padroes"), tr.get("sinais")
+    if pad is None or not len(pad):
+        return None
+    return {"padroes": [{"padrao": r["nome"], "status": r["status"], "acerto_3a": _arred(r.get("acerto_conf"), 3),
+                         "ganho_medio_por_operacao": _arred(r.get("expectativa_conf"), 4), "operacoes": r.get("n_conf")}
+                        for _, r in pad.iterrows()],
+            "sinais_hoje": [{"ticker": r["ticker"], "padrao": r["padrao_nome"], "status": r["status"], "entrada": _arred(r["preco"]),
+                             "stop": _arred(r["stop"]), "alvo": _arred(r["alvo"]), "barata": bool(r["barata"])}
+                            for _, r in (sin.head(8).iterrows() if sin is not None and len(sin) else [])]}
+
+
+def texto_trading(c: dict) -> str:
+    m = c.get("mesa_trading")
+    if not m:
+        return "A Mesa de Trading ainda não rodou: faça uma apuração."
+    ap = [p for p in m["padroes"] if p["status"].startswith("✅")]
+    txt = (f"⚡ Leo testou 5 padrões de médio prazo: {len(ap)} aprovado(s)"
+           + (f" ({', '.join(p['padrao'] for p in ap)})" if ap else " — nenhum venceu o chute com folga no teste, então não há sinal confiável") + ". ")
+    sinais = [x for x in m["sinais_hoje"] if x["status"].startswith("✅")]
+    if sinais:
+        txt += "Sinais de hoje: " + "; ".join(f"{x['ticker']} ({x['padrao']}): entrada ~{_r(x['entrada'])}, stop {_r(x['stop'])}, alvo {_r(x['alvo'])}"
+                                              for x in sinais[:4]) + ". "
+    else:
+        txt += "Hoje não há sinal de padrão aprovado — não operar também é uma decisão. "
+    return txt + "Arrisque no máximo 1% do capital de trading por operação e respeite o stop."
 
 
 def texto_previsibilidade(c: dict) -> str | None:
@@ -241,6 +271,8 @@ def responder_regras(pergunta: str, c: dict, R: dict) -> str:
     q = pergunta.lower()
     rk: pd.DataFrame = R["ranking"]
     t = _acha_ticker(pergunta, rk["ticker"].tolist())
+    if any(k in q for k in ("trade", "trading", "swing", "operar", "stop", "alvo", "vender com lucro", "curto prazo")) and not t:
+        return texto_trading(c)
     if t:
         r = rk.set_index("ticker").loc[t]
         txt = (f"**{t} — {r['nome']}**: sinal **{r['sinal']}**, nota {r['nota']:.0f}/100 ({int(r['posicao'])}º de {len(rk)}). "

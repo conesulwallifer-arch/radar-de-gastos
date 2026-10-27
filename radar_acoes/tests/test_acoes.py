@@ -476,3 +476,51 @@ def test_sofia_nao_vota_quando_e_so_ruido():
         prov2[f"D{i}"] = pd.Series([float(precos2[f"D{i}"].loc[d]) * dy / 4 for d in datas], index=datas)
     s2 = oraculos.sofia(precos2, prov2)
     assert s2["fator"] > 0 and s2["validacao"]["t_stat"] >= 2 and s2["pesos"]["dividendos dos últimos 12 meses"] > 0
+
+
+# ---------------------------------------------------------------- mesa de trading
+from acoes import trading  # noqa: E402
+
+
+def test_trading_simula_alvo_stop_e_protecao():
+    osc = 0.01  # risco = 1,2 × 1% × √20 ≈ 5,4% → stop 94,6 e alvo ≈ 110,7
+    stop, alvo = trading.niveis(100.0, osc)
+    assert stop == pytest.approx(100 * (1 - 1.2 * 0.01 * np.sqrt(20)), rel=1e-6) and alvo == pytest.approx(100 + 2 * (100 - stop))
+    sobe = np.array([100, 103, 106, 109, 112.0])
+    r = trading.simular(sobe, 0, osc)
+    assert r["motivo"] == "alvo" and r["ret"] == pytest.approx(alvo / 100 - 1 - trading.CUSTO)
+    cai = np.array([100, 98, 96, 93.0, 99])
+    assert trading.simular(cai, 0, osc)["motivo"] == "stop"
+    # subiu 1× o risco (stop vai para a entrada) e depois devolveu tudo: sai no zero a zero, não no prejuízo
+    devolve = np.array([100, 103, 106, 101, 99.5, 98.0])
+    r = trading.simular(devolve, 0, osc)
+    assert r["motivo"] == "empate" and r["ret"] > -0.01
+    # operação que ainda não terminou não entra na estatística
+    assert trading.simular(np.array([100, 101, 100.5]), 0, osc) is None
+
+
+def test_trading_nao_aprova_padrao_em_passeio_aleatorio():
+    rng = np.random.default_rng(5)
+    dias = pd.bdate_range("2014-01-01", periods=3000)
+    precos = {f"P{i}": pd.Series(25 * np.exp(np.cumsum(rng.normal(0, 0.017, len(dias)))), index=dias) for i in range(30)}
+    bt = trading.backtest(precos, {})
+    assert len(bt["padroes"]) == 5 and (bt["padroes"]["status"] != "✅ Aprovado").all()
+    assert bt["chute"]["n"] > 1000
+
+
+def test_trading_posicao_e_acompanhamento(tmp_path, monkeypatch):
+    pos = trading.tamanho_posicao(10_000, 0.01, 20.0, 18.0)  # arrisca R$ 100: 2,00 por ação → 50 ações
+    assert pos["quantidade"] == 50 and pos["perda_maxima"] == pytest.approx(100.0)
+    assert trading.tamanho_posicao(1_000, 0.05, 20.0, 19.9)["quantidade"] == 50  # nunca mais que o capital
+    monkeypatch.setattr(trading, "OPERACOES", tmp_path / "ops.csv")
+    monkeypatch.setattr(trading, "ESTADO_ALERTAS", tmp_path / "estado.json")
+    trading.salvar_operacoes(pd.DataFrame([
+        {"ticker": "aaaa3", "data_compra": "2026-10-01", "preco_compra": 10.0, "quantidade": 100, "stop": 9.0, "alvo": 12.0, "status": "aberta"},
+        {"ticker": "BBBB4", "data_compra": "2026-10-01", "preco_compra": 20.0, "quantidade": 50, "stop": 18.0, "alvo": 24.0, "status": "aberta"},
+        {"ticker": "CCCC3", "data_compra": "2026-10-01", "preco_compra": 30.0, "quantidade": 10, "stop": 27.0, "alvo": 36.0, "status": "fechada"},
+    ]))
+    ac = trading.acompanhar(trading.ler_operacoes(), {"AAAA3": 12.5, "BBBB4": 17.5, "CCCC3": 40.0}).set_index("ticker")
+    assert "ALVO" in ac.loc["AAAA3", "o_que_fazer"] and "STOP" in ac.loc["BBBB4", "o_que_fazer"] and "CCCC3" not in ac.index
+    assert ac.loc["AAAA3", "resultado_rs"] == pytest.approx(250.0)
+    msgs = trading.alertas_operacoes({"AAAA3": 12.5, "BBBB4": 17.5})
+    assert len(msgs) == 2 and trading.alertas_operacoes({"AAAA3": 12.5, "BBBB4": 17.5}) == []  # uma vez por dia

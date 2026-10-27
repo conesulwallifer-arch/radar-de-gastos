@@ -33,6 +33,7 @@ EQUIPE = {  # id: (nome, ícone, cargo)
     "proventos": ("Otto", "💵", "Previsor de Proventos"),
     "entrada": ("Bento", "🎯", "Estrategista de Entrada"),
     "conjunto": ("Sofia", "🧮", "Cientista de Dados"),
+    "trading": ("Leo", "⚡", "Trader de Médio Prazo"),
     "atlas": ("Atlas", "🧭", "Explorador autônomo"),
 }
 

@@ -19,7 +19,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, escritorio, dados, demo, aurum, macro, memoria, mesa, meta, noticias, oraculos, plano, previsao, previsor, universo  # noqa: E402
+from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, escritorio, dados, demo, aurum, macro, memoria, mesa, meta, noticias, oraculos, plano, previsao, previsor, trading, universo  # noqa: E402
 
 HIST = DADOS / "historico"
 REL = DADOS / "relatorios"
@@ -36,6 +36,10 @@ def print(*args, **kwargs):  # noqa: A001 — mensagens de acompanhamento nunca 
         _print_original(*(str(a).encode("ascii", "replace").decode() for a in args), **kwargs)
     except (OSError, ValueError):
         pass
+
+
+def _br(x: float) -> str:
+    return f"R$ {x:.2f}"
 
 
 def _tx(x: float) -> str:
@@ -56,7 +60,9 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     HIST.mkdir(parents=True, exist_ok=True)
     REL.mkdir(parents=True, exist_ok=True)
     cart = aporte.ler_carteira()
-    tickers = list(dict.fromkeys(tickers + cart["ticker"].tolist()))
+    ops_abertas = trading.ler_operacoes()
+    ops_abertas = ops_abertas[ops_abertas["status"].str.lower() == "aberta"]["ticker"].tolist()
+    tickers = list(dict.fromkeys(tickers + cart["ticker"].tolist() + ops_abertas))  # suas operações de trading também
 
     print(f"1/5 Coletando preços, proventos e indicadores de {len(tickers)} ações...")
     falar(f"📡 Coletando cotações, proventos e balanços de {len(tickers)} empresas...")
@@ -190,6 +196,25 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     print(f"   🪙 AURUM (dupla checagem): {int(rebaixa.sum())} ação(ões) tiradas das compras por falta de confirmação.")
     falar(f"🪙 **AURUM** fez a dupla checagem (nota do sistema × mesa): {int(rebaixa.sum())} ação(ões) saíram da lista de compras.")
 
+    print("⚡ Mesa de trading: testando os padrões no histórico e procurando sinais de hoje...")
+    falar("⚡ **Leo** (trader de médio prazo) está testando 5 padrões em todas as ações e procurando sinais de hoje...")
+    escritorio.status("trading", "trabalhando", "testando padrões e procurando sinais")
+    try:
+        bt_tr = trading.backtest(precos_base, proventos_base)
+        sinais_tr = trading.sinais_hoje(bt_tr, rk)
+        if not usar_demo:  # dados fictícios nunca entram no placar real
+            trading.registrar(sinais_tr[sinais_tr["status"] == "✅ Aprovado"] if len(sinais_tr) else sinais_tr, hoje)
+        tr = {**trading.resumir(bt_tr), "sinais": sinais_tr, "placar_real": trading.placar_real(precos_base)}
+        aprov = bt_tr["padroes"][bt_tr["padroes"]["status"] == "✅ Aprovado"]["nome"].tolist() if len(bt_tr["padroes"]) else []
+        n_ap = int((sinais_tr["status"] == "✅ Aprovado").sum()) if len(sinais_tr) else 0
+        escritorio.registrar("trading", f"testou 5 padrões em {len(bt_tr['ind'])} ações ({len(bt_tr['operacoes'])} operações simuladas): "
+                             f"{len(aprov)} aprovado(s); hoje {n_ap} sinal(is) de padrão aprovado")
+        falar(f"   ✓ ⚡ Leo: {len(aprov)} padrão(ões) aprovado(s) no teste; {n_ap} sinal(is) hoje.")
+    except Exception as e:  # noqa: BLE001 — o trading nunca derruba a apuração
+        print(f"  [aviso] mesa de trading: {e}")
+        tr = {"padroes": pd.DataFrame(), "chute": {}, "sinais": pd.DataFrame(), "placar_real": {"n": 0}, "n_operacoes": 0}
+    escritorio.status("trading", "pausa", "sinais do dia entregues")
+
     alts = alertas.gerar(rk, anterior(hoje), news, carteira=cart["ticker"].tolist())
     compras, sobra = aporte.sugerir(rk, valor_aporte, cart) if valor_aporte > 0 else (pd.DataFrame(), 0.0)
     texto = alertas.texto_resumo(rk, alts, compras, sobra=sobra)
@@ -200,6 +225,11 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
            f"🎯 Meta {alertas._fmt_r(pl['meta'])}: patrimônio hoje {alertas._fmt_r(pat)}, aportando {alertas._fmt_r(pl['aporte_mensal'])}/mês "
            f"→ metade das simulações chega em {meta.fmt_tempo(sim['meses_50'])}; 9 em 10 chegam em até {meta.fmt_tempo(sim['meses_90'])}."]
     texto = "\n".join(c for c in cab if c) + "\n\n" + texto
+    s_ap = tr["sinais"][tr["sinais"]["status"] == "✅ Aprovado"] if len(tr["sinais"]) else pd.DataFrame()
+    if len(s_ap):
+        texto += "\n\n⚡ Trading (médio prazo) — sinais de padrões aprovados no teste:\n" + "\n".join(
+            f"• {r['ticker']}: {r['padrao_nome']} — entrada ~{_br(r['preco'])}, stop {_br(r['stop'])}, alvo {_br(r['alvo'])} "
+            f"(acerto do padrão {r['acerto_padrao'] * 100:.0f}%)".replace(".", ",") for _, r in s_ap.head(5).iterrows())
     if sem_dados:
         texto += f"\n\nSem dados hoje (código pode ter mudado na B3): {', '.join(sem_dados)}"
     if usar_demo:
@@ -214,7 +244,7 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
                  "info": {t: d["info"] for t, d in base.items()},
                  "macro": mac, "backtest": bt, "carteira_esperada": cart_esp, "ibov": ibov,
                  "mesa": reuniao, "previsor": {"validacao": validacao, "fator": fator, "placar_real": placar},
-                 "oraculos": orac["placar"]}
+                 "oraculos": orac["placar"], "trading": tr}
     print("🪙 AURUM escrevendo o relatório do dia" + (" (IA + pesquisa na web)..." if usar_ia and aurum.ia_disponivel() else "..."))
     falar("🧭 **Atlas** (explorador autônomo) está decidindo por conta própria o que investigar...")
     resumo_atlas = mesa.resumo_texto(reuniao) + "\n" + "\n".join(

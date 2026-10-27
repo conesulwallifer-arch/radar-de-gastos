@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import DADOS, alertas, aporte, escritorio, plano, semanal, universo, vigia  # noqa: E402
+from acoes import DADOS, alertas, aporte, escritorio, plano, semanal, trading, universo, vigia  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
 
 alertas.carregar_config()  # config.env antes de ler os intervalos abaixo
@@ -80,11 +80,30 @@ def enviar(texto: str, assunto: str) -> None:
         print("  (Telegram/e-mail não configurados: o aviso ficou no painel e no diário.)")
 
 
+def avisar_operacoes(precos: dict[str, float]) -> None:
+    """Suas operações de trading: avisa no Telegram quando bater o alvo, o stop ou for hora de proteger o ganho."""
+    try:
+        msgs = trading.alertas_operacoes(precos)
+    except Exception as e:  # noqa: BLE001
+        print(f"  [aviso] operações de trading: {e}")
+        return
+    if msgs:
+        escritorio.registrar("trading", f"avisou sobre {len(msgs)} operação(ões) sua(s): " + "; ".join(m.split(':')[0] for m in msgs))
+        enviar("⚡ AURUM — suas operações de trading\n\n" + "\n\n".join(msgs) + "\n\nNão é recomendação de investimento.",
+               f"AURUM: {len(msgs)} aviso(s) de trading")
+
+
+def _precos_do(R: dict) -> dict[str, float]:
+    rk = R["ranking"]
+    return {t: float(p) for t, p in zip(rk["ticker"], rk["preco"]) if p == p}
+
+
 def apuracao_completa() -> None:
     print(f"[{agora():%d/%m %H:%M}] 🪙 Reunião completa da equipe começando...")
     escritorio.registrar("aurum", "convocou a equipe para a apuração completa")
     coberto = ultimo_pregao_fechado(agora())
-    apurar(universo.tickers(), plano.ler()["aporte_mensal"], forcar=True)  # já envia o relatório do AURUM
+    R = apurar(universo.tickers(), plano.ler()["aporte_mensal"], forcar=True)  # já envia o relatório do AURUM
+    avisar_operacoes(_precos_do(R))
     FECHAMENTO.write_text(coberto.isoformat(), encoding="utf-8")
 
 
@@ -105,7 +124,8 @@ def apuracao_horaria() -> None:
     _INICIO_ULTIMA.append(time.time())
     print(f"[{agora():%d/%m %H:%M}] 🪙 Apuração da hora (preços novos)...")
     escritorio.registrar("aurum", "convocou a equipe para a apuração da hora, com preços novos do pregão")
-    apurar(universo.tickers(), plano.ler()["aporte_mensal"], enviar=False, forcar=True, usar_ia=False)
+    R = apurar(universo.tickers(), plano.ler()["aporte_mensal"], enviar=False, forcar=True, usar_ia=False)
+    avisar_operacoes(_precos_do(R))
     escritorio.status("aurum", "pausa", f"próxima apuração por volta das {agora() + timedelta(minutes=APURAR_A_CADA_MIN):%H:%M}")
 
 
@@ -118,6 +138,13 @@ def checagem() -> None:
         R = pickle.load(f)
     escritorio.status(["risco", "tendencia"], "vigiando", "conferindo os preços do pregão")
     novos = vigia.checar(R, aporte.ler_carteira()["ticker"].tolist())
+    ops = trading.ler_operacoes()
+    abertas = ops[ops["status"].str.lower() == "aberta"]["ticker"].tolist()
+    if abertas:
+        try:
+            avisar_operacoes(vigia.precos_agora(abertas))
+        except Exception as e:  # noqa: BLE001
+            print(f"  [aviso] preços das operações: {e}")
     print(f"[{agora():%d/%m %H:%M}] Vigia: {len(novos)} alerta(s) novo(s).")
     escritorio.registrar("risco", f"conferiu os preços do pregão: {len(novos)} alerta(s) novo(s)" if novos
                          else "conferiu os preços do pregão: nada fora do normal")

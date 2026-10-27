@@ -25,7 +25,7 @@ for _fluxo in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-from acoes import AVISO, agenda, aovivo, aporte, atlas, aurum, escritorio, memoria, mesa, meta, plano, universo, visual  # noqa: E402
+from acoes import AVISO, agenda, aovivo, trading, aporte, atlas, aurum, escritorio, memoria, mesa, meta, plano, universo, visual  # noqa: E402
 import segundo_plano  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
 
@@ -166,7 +166,7 @@ if R.get("demo"):
     st.error("⚠️ **MODO DEMONSTRAÇÃO — NÚMEROS FICTÍCIOS.** Nada aqui vale para investir. "
              "Clique em **🔄 Apurar agora (dados reais)** na barra lateral.")
 
-abas = st.tabs(["🪙 AURUM", "📡 Mercado ao vivo", "🔭 Previsões", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
+abas = st.tabs(["🪙 AURUM", "📡 Mercado ao vivo", "🔭 Previsões", "⚡ Trading", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
                 "🧪 O sistema funciona?", "🔔 Alertas", "❓ Como funciona e limites"])
 
 # carteira-alvo e números da meta, usados em várias abas
@@ -440,8 +440,164 @@ with abas[2]:
 """)
 
 
-# ======================================================================= SALA DOS AGENTES
+# ======================================================================= TRADING (médio prazo)
 with abas[3]:
+    tr = R.get("trading") or {}
+    pad = tr.get("padroes", pd.DataFrame())
+    sin = tr.get("sinais", pd.DataFrame())
+    ch = tr.get("chute") or {}
+    pr = tr.get("placar_real") or {}
+    st.markdown("### ⚡ Mesa de Trading — médio prazo (semanas a 3 meses)")
+    st.caption("O **Leo** testa 5 padrões clássicos do mercado em todas as ações, com custos, e compara com entrar em dias aleatórios. "
+               "Só os padrões que **venceram o chute em dois períodos separados** viram sinal. Cada sinal vem com **entrada, stop e alvo**.")
+    st.warning("**Trading é separado do projeto de dividendos.** Use só um dinheiro que você aceita arriscar (ex.: até 10–20% do total), "
+               "arrisque no máximo **1% desse capital por operação** e **respeite o stop sempre** — é ele que faz a conta fechar no positivo.")
+    if pad is None or len(pad) == 0:
+        st.info("A Mesa de Trading entra na próxima apuração. Clique em **🔄 Apurar agora** na barra lateral.")
+    else:
+        ap = pad[pad["status"] == "✅ Aprovado"]
+        visual.cartoes([
+            ("PADRÕES APROVADOS", f"{len(ap)} de {len(pad)}", "venceram o chute nos 2 períodos", "ok" if len(ap) else "alerta"),
+            ("SINAIS HOJE", str(int((sin["status"] == "✅ Aprovado").sum())) if len(sin) else "0",
+             f"+ {int((sin['status'] != '✅ Aprovado').sum()) if len(sin) else 0} em observação", ""),
+            ("CHUTE (DIA ALEATÓRIO)", pct(ch.get("acerto"), 0), f"ganha em média {pct(ch.get('expectativa'), 1)} por operação", ""),
+            ("PLACAR REAL DOS SINAIS", pct(pr.get("acerto"), 0) if pr.get("n") else "—",
+             f"{pr.get('n', 0)} encerrados · {pr.get('abertos', 0)} em andamento" if pr.get("n") or pr.get("abertos") else "começa a contar com os sinais de hoje", ""),
+        ])
+
+        st.markdown("#### 🎯 Sinais de hoje")
+        so_baratas = st.toggle("Só ações baratas (abaixo do preço-teto, do preço justo ou P/VP < 1)", value=False, key="tr_baratas")
+        if sin is None or sin.empty:
+            st.info("Nenhum padrão aprovado ou em observação disparou nos últimos 3 pregões. **Não operar também é uma decisão** — "
+                    "o Leo avisa quando aparecer oportunidade.")
+        else:
+            vs = sin[sin["barata"]] if so_baratas else sin
+            if vs.empty:
+                st.info("Nenhum sinal em ação barata hoje.")
+            else:
+                tv = vs.assign(
+                    status_txt=vs["status"], barata_txt=np.where(vs["barata"], "💲 sim", "—"),
+                    ganho_pct=vs["ganho_alvo"] * 100, perda_pct=vs["perda_stop"] * 100,
+                    acerto_pad=vs["acerto_padrao"] * 100, expect=vs["expectativa_padrao"] * 100,
+                    acerto_acao_txt=[f"{a * 100:.0f}% em {n}" if a == a else f"poucos casos ({n})" for a, n in zip(vs["acerto_acao"], vs["n_acao"])],
+                    equipe=[f"{COR_SINAL.get(s_, '')} {s_}" if isinstance(s_, str) else "—" for s_ in vs["sinal_equipe"]],
+                )
+                for c in ("preco", "stop", "alvo"):
+                    tv[c] = tv[c].round(2)
+                st.dataframe(tv[["status_txt", "ticker", "padrao_nome", "barata_txt", "preco", "stop", "alvo", "ganho_pct", "perda_pct",
+                                 "acerto_pad", "expect", "dias_medio", "acerto_acao_txt", "nota", "equipe"]],
+                             hide_index=True, width="stretch",
+                             column_config={
+                                 "status_txt": st.column_config.TextColumn("Padrão no teste"),
+                                 "ticker": st.column_config.TextColumn("Ação"),
+                                 "padrao_nome": st.column_config.TextColumn("Padrão"),
+                                 "barata_txt": st.column_config.TextColumn("Barata?"),
+                                 "preco": col_rs("Entrada"),
+                                 "stop": col_rs("Stop", "Se fechar abaixo, venda: limita a perda."),
+                                 "alvo": col_rs("Alvo", "Preço de venda com lucro (2× o risco)."),
+                                 "ganho_pct": st.column_config.NumberColumn("Ganho no alvo (%)", format="+%.1f"),
+                                 "perda_pct": st.column_config.NumberColumn("Perda no stop (%)", format="%.1f"),
+                                 "acerto_pad": st.column_config.NumberColumn("Acerto do padrão (%)", format="%.0f",
+                                                                             help="Nos últimos 3 anos, % das operações deste padrão que terminaram no lucro (com custos)."),
+                                 "expect": st.column_config.NumberColumn("Ganho médio/oper. (%)", format="%+.2f",
+                                                                         help="Média de TODAS as operações do padrão (ganhos e perdas). É o que importa: positivo = o padrão paga."),
+                                 "dias_medio": st.column_config.NumberColumn("Dura (pregões)", format="%.0f"),
+                                 "acerto_acao_txt": st.column_config.TextColumn("Nesta ação"),
+                                 "nota": st.column_config.ProgressColumn("Nota da equipe", min_value=0, max_value=100, format="%.0f"),
+                                 "equipe": st.column_config.TextColumn("Sinal longo prazo"),
+                             })
+                st.caption("Acerto de 40–55% é normal em bons padrões: o lucro vem de o alvo (2× o risco) pagar mais do que o stop tira. "
+                           "Olhe o **Ganho médio por operação**, não só o acerto.")
+
+                with st.expander("🧮 Calculadora: quantas ações comprar", expanded=True):
+                    c1, c2, c3 = st.columns(3)
+                    capital = c1.number_input("Capital para trading (R$)", min_value=0.0, value=float(st.session_state.get("tr_cap", 5000.0)), step=500.0, key="tr_cap")
+                    risco = c2.slider("Risco por operação (% do capital)", 0.5, 3.0, 1.0, 0.25, key="tr_risco") / 100
+                    escolha = c3.selectbox("Sinal", [f"{r['ticker']} · {r['padrao_nome']}" for _, r in vs.iterrows()], key="tr_sel")
+                    r_ = vs.iloc[[f"{r['ticker']} · {r['padrao_nome']}" for _, r in vs.iterrows()].index(escolha)]
+                    tp_ = trading.tamanho_posicao(capital, risco, float(r_["preco"]), float(r_["stop"]))
+                    visual.cartoes([("COMPRAR", f"{tp_['quantidade']} ações", f"{brl(tp_['valor'])} a {brl(r_['preco'])}", ""),
+                                    ("SE BATER O STOP", brl(-tp_["perda_maxima"]), f"venda a {brl(r_['stop'])}", "perigo"),
+                                    ("SE BATER O ALVO", brl(tp_["quantidade"] * (r_["alvo"] - r_["preco"])), f"venda a {brl(r_['alvo'])}", "ok")])
+                    st.caption("Dica: no home broker, compre e já deixe a **ordem de stop** e a **ordem de venda no alvo** programadas (OCO, se a corretora tiver).")
+
+        st.markdown("#### 💼 Minhas operações")
+        st.caption("Registre aqui o que você comprou. O Leo acompanha e **avisa no Telegram** (com a Equipe 24h ligada) quando bater o alvo, "
+                   "o stop ou quando for hora de subir o stop para proteger o ganho.")
+        ops = trading.ler_operacoes()
+        ed = st.data_editor(ops, num_rows="dynamic", width="stretch", key="tr_ops", hide_index=True,
+                            column_config={
+                                "ticker": st.column_config.TextColumn("Ação", required=True),
+                                "data_compra": st.column_config.TextColumn("Data compra (AAAA-MM-DD)"),
+                                "preco_compra": st.column_config.NumberColumn("Preço compra", format="%.2f", min_value=0.0),
+                                "quantidade": st.column_config.NumberColumn("Qtd.", format="%d", min_value=0),
+                                "stop": st.column_config.NumberColumn("Stop", format="%.2f"),
+                                "alvo": st.column_config.NumberColumn("Alvo", format="%.2f"),
+                                "status": st.column_config.SelectboxColumn("Situação", options=["aberta", "fechada"], default="aberta"),
+                                "preco_venda": st.column_config.NumberColumn("Preço venda", format="%.2f"),
+                                "data_venda": st.column_config.TextColumn("Data venda"),
+                                "obs": st.column_config.TextColumn("Obs."),
+                            })
+        if st.button("💾 Salvar operações", key="tr_salvar"):
+            trading.salvar_operacoes(ed)
+            st.success("Operações salvas.")
+            st.rerun()
+        precos_ag = {t: float(p_) for t, p_ in zip(rk["ticker"], rk["preco"]) if p_ == p_}
+        ult_ao = st.session_state.get("ao_vivo_ultimo")
+        if ult_ao is not None and len(ult_ao):
+            precos_ag.update({t: float(p_) for t, p_ in zip(ult_ao["ticker"], ult_ao["preco"])})
+        acomp = trading.acompanhar(ops, precos_ag)
+        if len(acomp):
+            st.dataframe(acomp.assign(resultado=acomp["resultado"] * 100), hide_index=True, width="stretch",
+                         column_config={"ticker": "Ação", "preco_compra": col_rs("Compra"), "preco_agora": col_rs("Agora"),
+                                        "quantidade": st.column_config.NumberColumn("Qtd.", format="%d"),
+                                        "resultado": st.column_config.NumberColumn("Resultado (%)", format="%+.1f"),
+                                        "resultado_rs": col_rs("Resultado"), "stop": col_rs("Stop"), "alvo": col_rs("Alvo"),
+                                        "dias": st.column_config.NumberColumn("Pregões", format="%d"),
+                                        "o_que_fazer": st.column_config.TextColumn("O que fazer", width="large")})
+        fechadas = ops[(ops["status"].str.lower() == "fechada") & ops["preco_venda"].notna() & ops["preco_compra"].notna()]
+        if len(fechadas):
+            res = (fechadas["preco_venda"] - fechadas["preco_compra"]) * fechadas["quantidade"].fillna(0)
+            st.caption(f"Operações encerradas: {len(fechadas)} · ganharam {int((res > 0).sum())} · resultado total {brl(float(res.sum()))} (antes de IR).")
+
+        st.markdown("#### 📋 Os padrões e o teste de cada um")
+        tp2 = pad.assign(acerto=pad["acerto_conf"] * 100, ganho=pad["ganho_medio_conf"] * 100, perda=pad["perda_media_conf"] * 100,
+                         expect=pad["expectativa_conf"] * 100, expect_d=pad["expectativa_desc"] * 100, vant=pad["vantagem_vs_chute"] * 100)
+        st.dataframe(tp2[["status", "nome", "n_conf", "acerto", "ganho", "perda", "expect", "vant", "expect_d", "n_desc", "dias_medio_conf"]],
+                     hide_index=True, width="stretch",
+                     column_config={"status": "Resultado", "nome": "Padrão",
+                                    "n_conf": st.column_config.NumberColumn("Operações (3 anos)", format="%d"),
+                                    "acerto": st.column_config.NumberColumn("Acerto (%)", format="%.0f"),
+                                    "ganho": st.column_config.NumberColumn("Ganho médio (%)", format="+%.1f"),
+                                    "perda": st.column_config.NumberColumn("Perda média (%)", format="%.1f"),
+                                    "expect": st.column_config.NumberColumn("Por operação (%)", format="%+.2f"),
+                                    "vant": st.column_config.NumberColumn("vs. chute (p.p.)", format="%+.2f"),
+                                    "expect_d": st.column_config.NumberColumn("Período antigo (%)", format="%+.2f",
+                                                                              help="Mesmo teste no período anterior: o padrão também funcionava?"),
+                                    "n_desc": st.column_config.NumberColumn("Oper. antigas", format="%d"),
+                                    "dias_medio_conf": st.column_config.NumberColumn("Dura (pregões)", format="%.0f")})
+        with st.expander("📖 Como cada padrão funciona"):
+            for k, (nome_, desc_) in trading.PADROES.items():
+                st.markdown(f"**{nome_}** — {desc_}")
+            st.markdown(f"""
+**Regras de saída (iguais para todos):** stop a ~1 mês de oscilação normal da ação (entre 5% e 18% abaixo da entrada); alvo a **2× o risco**;
+quando o ganho chega a 1× o risco, o stop sobe para o preço de compra (não deixa um ganho virar perda); se em **3 meses** não bateu
+nem alvo nem stop, sai pelo preço do dia. Custos de {trading.CUSTO * 100:.2f}% por operação já descontados.
+""".replace(".", ",", 1))
+        with st.expander("🧾 Imposto e regras (Brasil)"):
+            st.markdown("""
+- **Swing trade (compra e venda em dias diferentes)**: 15% sobre o lucro. **Isento** se o total de **vendas** de ações no mês for até **R$ 20 mil**.
+- **Day trade** (compra e venda no mesmo dia): 20%, sem isenção — este sistema **não** é para day trade.
+- O imposto é pago por você via **DARF** até o último dia útil do mês seguinte; prejuízos compensam lucros futuros do mesmo tipo.
+- Confirme com um contador; regras podem mudar.
+""")
+        if pr.get("n") or pr.get("abertos"):
+            with st.expander("📊 Placar real: todos os sinais aprovados já dados"):
+                st.dataframe(pr["tabela"], hide_index=True, width="stretch")
+
+
+# ======================================================================= SALA DOS AGENTES
+with abas[4]:
     @st.fragment(run_every=20)
     def _sala_ao_vivo():
         """Atualiza sozinho a cada 20 s: dá para ver a equipe trabalhando enquanto o agente roda."""
@@ -618,7 +774,7 @@ with abas[3]:
                        "Cada previsão diária é registrada e conferida 1 mês depois — o placar real aparece acima.")
 
 # ======================================================================= HOJE
-with abas[4]:
+with abas[5]:
     st.subheader(f"Este mês, com {brl(pl['aporte_mensal'])} de aporte, compre:")
     compras, sobra = aporte.sugerir(rk, pl["aporte_mensal"], cart)
     if compras.empty:
@@ -705,7 +861,7 @@ with abas[4]:
         st.caption(f"+ {len(imp) - 8} alertas na aba 🔔 Alertas.")
 
 # ======================================================================= AGENDA
-with abas[5]:
+with abas[6]:
     st.subheader("📅 Quanto você deve receber nos próximos 12 meses")
     compras_ag, _ = aporte.sugerir(rk, pl["aporte_mensal"], cart)
     atual = dict(zip(cart["ticker"], cart["quantidade"])) if len(cart) else {}
@@ -742,7 +898,7 @@ with abas[5]:
                    "Use isto para encaixar compras que você já ia fazer.")
 
 # ======================================================================= META
-with abas[6]:
+with abas[7]:
     st.subheader("🎯 Quanto tempo até a sua meta — e o que te leva mais rápido")
     st.caption("O sistema simula 5.000 futuros possíveis para a bolsa (anos bons e ruins, na proporção do passado) "
                "e mostra a CHANCE de você chegar até cada ano. Ninguém consegue prometer uma data exata.")
@@ -824,7 +980,7 @@ with abas[6]:
                  hide_index=True, width="stretch")
 
 # ======================================================================= RANKING
-with abas[7]:
+with abas[8]:
     st.caption("Todas as ações acompanhadas, da melhor para a pior para quem quer **renda + patrimônio no longo prazo**. "
                "Passe o mouse no título de cada coluna para ver o que significa.")
     f1, f2, f3 = st.columns([2, 2, 1])
@@ -878,7 +1034,7 @@ with abas[7]:
         st.caption(f"Sem dados nesta apuração (código pode ter mudado na B3): {', '.join(R['sem_dados'])}")
 
 # ======================================================================= EMPRESA
-with abas[8]:
+with abas[9]:
     nomes = rk.set_index("ticker")["nome"]
     t = st.selectbox("Escolha a empresa", rk["ticker"], format_func=lambda x: f"{x} — {nomes[x]}")
     r = rk.set_index("ticker").loc[t]
@@ -1000,7 +1156,7 @@ with abas[8]:
                      hide_index=True, width="stretch")
 
 # ======================================================================= CARTEIRA
-with abas[9]:
+with abas[10]:
     st.markdown("**Minha carteira** — digite as ações que você já tem e clique em Salvar. "
                 "O aporte do mês passa a completar o que está abaixo do alvo, e os alertas acompanham as suas ações.")
     base_cart = cart if not cart.empty else pd.DataFrame({"ticker": pd.Series(dtype=str), "quantidade": pd.Series(dtype=float),
@@ -1030,7 +1186,7 @@ with abas[9]:
         st.caption("'Evitar' numa ação que você já tem não é ordem de venda: é um sinal para olhar as notícias e os resultados.")
 
 # ======================================================================= BACKTEST
-with abas[10]:
+with abas[11]:
     bt = R.get("backtest")
     st.subheader("🧪 E se você tivesse seguido o sistema nos últimos 5 anos?")
     if not bt:
@@ -1064,7 +1220,7 @@ with abas[10]:
             st.dataframe(bt["compras"].iloc[::-1], hide_index=True, width="stretch")
 
 # ======================================================================= ALERTAS
-with abas[11]:
+with abas[12]:
     if not R["alertas"]:
         st.success("Nenhum alerta hoje.")
     icones = {"Oportunidade": "🟢", "Queda forte": "📉", "Provento": "💰", "Data-com": "📅", "Ranking": "🏆",
@@ -1076,7 +1232,7 @@ with abas[11]:
             (st.warning if a["nivel"] == 1 else st.info)(md(f"{icones.get(a['tipo'], '•')} **{a['tipo']}** — {a['texto']}"))
 
 # ======================================================================= COMO FUNCIONA
-with abas[12]:
+with abas[13]:
     st.markdown("""
 ### De onde vêm os dados (todos reais e atualizados a cada apuração)
 - **Cotações, proventos (dividendos + JCP) e balanço**: Yahoo Finance. A data da última cotação aparece no topo.

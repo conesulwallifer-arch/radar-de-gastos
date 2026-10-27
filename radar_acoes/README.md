@@ -105,6 +105,20 @@ Três especialistas em prever, cada um **testado no passado sem colar** — o pl
 
 Otto e Sofia votam na mesa (Bento só informa o preço). Quem não prova vantagem no teste fica neutro — o mesmo vale para a Íris.
 
+### ⚡ Mesa de Trading (médio prazo)
+A aba **⚡ Trading** é separada do projeto de dividendos. O **Leo** testa 5 padrões clássicos em todas as ações:
+correção na tendência de alta, rompimento de máxima de 3 meses, **dividendos no topo + virada** (barata pela renda e começando a subir),
+cruzamento dourado e **queda forte + virada**.
+
+- **Regras de saída iguais para todos:** stop a ~1 mês de oscilação normal (5% a 18%), alvo a 2× o risco, stop vai para a entrada
+  quando o ganho cobre o risco, saída por tempo em 3 meses; custos descontados.
+- **Teste honesto:** dois períodos separados (antigo e últimos 3 anos) e comparação com o *chute* (entrar em dias aleatórios com as
+  mesmas saídas). ✅ Aprovado só se ganhou nos dois períodos e venceu o chute com folga estatística (t ≥ 1,5).
+- **Sinais de hoje** com entrada, stop, alvo, acerto do padrão e se a ação está **barata**; ações vetadas pelo Rex ficam de fora.
+- **Calculadora de posição** (arriscar 1% do capital por operação) e **Minhas operações**: o Leo acompanha e avisa no Telegram
+  quando bater alvo, stop ou for hora de proteger o ganho.
+- **Placar real:** os sinais aprovados são registrados e conferidos depois.
+
 ### 🔄 Atualizar
 Dê dois cliques em **`Atualizar AURUM.bat`**: baixa a versão mais nova, mantém `dados_acoes` e `config.env`,
 reinicia a Equipe 24h (se estiver ligada) e abre o painel.
