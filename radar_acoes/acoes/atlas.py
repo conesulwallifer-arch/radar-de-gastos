@@ -62,12 +62,35 @@ def _propor(ticker: str, motivo: str) -> bool:
     return True
 
 
-def limpar_descobertas(sem_dados: list[str]) -> None:
-    """Remove propostas que o Yahoo não reconheceu (código errado ou inexistente)."""
-    if not DESCOBERTAS.exists() or not sem_dados:
+def limpar_descobertas(sem_dados: list[str], dias_tolerancia: int = 3) -> None:
+    """Remove propostas que ficaram SEM DADOS por `dias_tolerancia` dias seguidos (código errado ou fora da B3).
+    Uma falha passageira do Yahoo não apaga mais a descoberta."""
+    if not DESCOBERTAS.exists():
         return
-    linhas = [l for l in DESCOBERTAS.read_text(encoding="utf-8").splitlines() if l.split("#")[0].strip() not in sem_dados]
-    DESCOBERTAS.write_text("\n".join(linhas) + ("\n" if linhas else ""), encoding="utf-8")
+    import json
+    from datetime import date as _d
+    cont_arq = DESCOBERTAS.with_name("descobertas_falhas.json")
+    try:
+        cont = json.loads(cont_arq.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cont = {}
+    hoje = _d.today().isoformat()
+    for t in sem_dados:
+        reg = cont.get(t, {"dias": 0, "ultimo": ""})
+        if reg["ultimo"] != hoje:
+            reg = {"dias": reg["dias"] + 1, "ultimo": hoje}
+        cont[t] = reg
+    linhas_atuais = [l.split("#")[0].strip() for l in DESCOBERTAS.read_text(encoding="utf-8").splitlines()]
+    for t in list(cont):
+        if t not in sem_dados and t in linhas_atuais:
+            cont.pop(t)  # voltou a ter dados: zera
+    remover = {t for t, r in cont.items() if r["dias"] >= dias_tolerancia}
+    if remover:
+        linhas = [l for l in DESCOBERTAS.read_text(encoding="utf-8").splitlines() if l.split("#")[0].strip() not in remover]
+        DESCOBERTAS.write_text("\n".join(linhas) + ("\n" if linhas else ""), encoding="utf-8")
+        for t in remover:
+            cont.pop(t, None)
+    cont_arq.write_text(json.dumps(cont), encoding="utf-8")
 
 
 # ------------------------------------------------------------------ as ferramentas (o que o Atlas pode fazer)

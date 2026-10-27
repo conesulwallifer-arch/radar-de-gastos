@@ -34,13 +34,19 @@ def _num(v):
         return np.nan
 
 
-def proventos_por_ano(proventos: pd.Series, hoje: pd.Timestamp | None = None) -> pd.Series:
-    """Soma por ano civil dos anos completos (exclui o ano corrente)."""
+def proventos_por_ano(proventos: pd.Series, hoje: pd.Timestamp | None = None, primeiro_ano: int | None = None) -> pd.Series:
+    """Soma por ano civil dos anos completos (exclui o ano corrente), COM ZERO nos anos em que não pagou.
+
+    `primeiro_ano`: primeiro ano inteiro com cotação. Sem os zeros, quem pagou em 2 de 5 anos parecia pagar todo ano
+    (a média, o preço-teto e o crescimento saíam inflados)."""
     hoje = hoje or pd.Timestamp(date.today())
-    if proventos.empty:
+    if proventos.empty and primeiro_ano is None:
         return pd.Series(dtype=float)
-    anual = proventos.groupby(proventos.index.year).sum()
-    return anual[anual.index < hoje.year]
+    anual = proventos.groupby(proventos.index.year).sum() if not proventos.empty else pd.Series(dtype=float)
+    ini = primeiro_ano if primeiro_ano is not None else int(anual.index.min())
+    if ini >= hoje.year:
+        return pd.Series(dtype=float)
+    return anual.reindex(range(ini, hoje.year), fill_value=0.0).astype(float)
 
 
 def indicadores(d: dict, hoje: pd.Timestamp | None = None) -> dict:
@@ -48,12 +54,13 @@ def indicadores(d: dict, hoje: pd.Timestamp | None = None) -> dict:
     info, precos, prov = d["info"], d["precos"], d["proventos"]
     t = d["ticker"]
     preco = _num(info.get("currentPrice") or info.get("regularMarketPrice"))
-    if np.isnan(preco) and not precos.empty:
-        preco = float(precos.iloc[-1])
+    if (np.isnan(preco) or d.get("info_antiga")) and not precos.empty:
+        preco = float(precos.iloc[-1])  # indicadores de outro dia: o preço vem do histórico, que é de hoje
 
     # ---- Proventos (dividendos + JCP, pela data-ex) ----
     ult12 = float(prov[prov.index > hoje - pd.DateOffset(years=1)].sum()) if not prov.empty else 0.0
-    anual = proventos_por_ano(prov, hoje)
+    primeiro = int(precos.index.min().year) + 1 if not precos.empty else None
+    anual = proventos_por_ano(prov, hoje, primeiro)
     anos10 = anual[anual.index >= hoje.year - 10]
     anos_pagou = int((anos10 > 0).sum())
     anos_hist = max(1, min(10, hoje.year - int(precos.index.min().year))) if not precos.empty else 1
@@ -61,7 +68,7 @@ def indicadores(d: dict, hoje: pd.Timestamp | None = None) -> dict:
     media3 = float(anual[anual.index >= hoje.year - 3].mean()) if len(anual) else 0.0
     ult5 = anual[anual.index >= hoje.year - 5]
     if len(ult5) >= 3 and ult5.iloc[0] > 0 and ult5.iloc[-1] > 0:
-        cagr_div = (ult5.iloc[-1] / ult5.iloc[0]) ** (1 / (len(ult5) - 1)) - 1
+        cagr_div = (ult5.iloc[-1] / ult5.iloc[0]) ** (1 / (ult5.index[-1] - ult5.index[0])) - 1
     else:
         cagr_div = np.nan
     cv_div = float(ult5.std() / ult5.mean()) if len(ult5) >= 3 and ult5.mean() > 0 else np.nan
@@ -82,12 +89,16 @@ def indicadores(d: dict, hoje: pd.Timestamp | None = None) -> dict:
     lpa, vpa = _num(info.get("trailingEps")), _num(info.get("bookValue"))
     pl = preco / lpa if lpa and lpa > 0 else _num(info.get("trailingPE"))
     pvp = preco / vpa if vpa and vpa > 0 else _num(info.get("priceToBook"))
+    if pvp == pvp and pvp <= 0:
+        pvp = np.nan  # patrimônio negativo: P/VP negativo NÃO é "barato" (antes ganhava a melhor nota)
     roe = _num(info.get("returnOnEquity"))
     if np.isnan(roe) and lpa and vpa and vpa > 0:
         roe = lpa / vpa
     margem = _num(info.get("profitMargins"))
     div_pl = _num(info.get("debtToEquity"))
     div_pl = div_pl / 100 if not np.isnan(div_pl) else np.nan  # Yahoo informa em %
+    if div_pl == div_pl and div_pl < 0:
+        div_pl = np.nan  # dívida/patrimônio negativo = patrimônio negativo; não pode contar como "pouca dívida"
     payout = (ult12 / lpa) if lpa and lpa > 0 else _num(info.get("payoutRatio"))
     cresc_lucro = _num(info.get("earningsGrowth"))
 
@@ -110,6 +121,7 @@ def indicadores(d: dict, hoje: pd.Timestamp | None = None) -> dict:
         "proventos_12m": ult12, "proventos_media_5a": media5, "proventos_media_3a": media3,
         "anos_pagou_10": anos_pagou, "anos_historico": anos_hist, "cresc_proventos_5a": cagr_div,
         "estabilidade_proventos": cv_div, "meses_pagamento": meses_pag,
+        "pl_fonte": _num(info.get("trailingPE")), "moeda_balanco": info.get("financialCurrency"), "info_antiga": bool(d.get("info_antiga")),
         "pl": pl, "pvp": pvp, "roe": roe, "margem_liquida": margem, "divida_pl": div_pl, "payout": payout,
         "cresc_lucro": cresc_lucro, "lpa": lpa, "vpa": vpa, "volatilidade": vol, "queda_max_5a": queda_max,
         "preco_teto_bazin": teto_bazin, "margem_bazin": margem_bazin, "preco_justo_graham": graham,
@@ -193,7 +205,9 @@ def sinal(i: dict) -> str:
     """Comprar / Acumular / Aguardar (boa, mas cara ou paga pouco) / Evitar."""
     n, mb = i["nota"], i["margem_bazin"]
     barata = mb == mb and mb >= 0
-    if i.get("lpa") != i.get("lpa") or (i.get("lpa") or 0) <= 0:
+    if i.get("lpa") != i.get("lpa"):
+        return "Aguardar"  # lucro não informado pela fonte: sem dado não se compra, mas também não se condena
+    if i["lpa"] <= 0:
         return "Evitar"
     dy = i.get("dy_medio_5a")
     if dy != dy or dy is None or dy < DY_MINIMO_RENDA:
@@ -227,6 +241,15 @@ def confianca(i: dict, hoje: pd.Timestamp | None = None) -> tuple[str, list[str]
         avisos.append("último provento muito acima do normal (extraordinário?)")
     if i["lpa"] != i["lpa"] or i["vpa"] != i["vpa"]:
         avisos.append("lucro ou patrimônio por ação não informados pela fonte")
+    pe_fonte = i.get("pl_fonte")
+    if i.get("pl") == i.get("pl") and pe_fonte == pe_fonte and pe_fonte and pe_fonte > 0 and abs(i["pl"] / pe_fonte - 1) > 0.30:
+        avisos.append(f"P/L calculado ({i['pl']:.1f}) difere do informado pela fonte ({pe_fonte:.1f}): lucro por ação pode estar em outra base (units?)")
+        grave = True
+    if i.get("moeda_balanco") and i["moeda_balanco"] != "BRL":
+        avisos.append(f"balanço em {i['moeda_balanco']}: lucro e patrimônio por ação não estão em reais")
+        grave = True
+    if i.get("info_antiga"):
+        avisos.append("indicadores de um dia anterior (a fonte falhou hoje); preço e proventos estão atualizados")
     if i["anos_historico"] < 5:
         avisos.append(f"pouco histórico na bolsa ({i['anos_historico']} anos)")
     nivel = "Baixa" if grave or len(avisos) >= 3 else "Média" if avisos else "Alta"
@@ -251,7 +274,8 @@ def explicar(i: dict) -> str:
         partes.append("não pagou proventos nos últimos anos")
     mb = i["margem_bazin"]
     if mb == mb:
-        partes.append(f"está {_p(mb)} abaixo do preço-teto" if mb >= 0 else f"está {_p(-mb)} acima do preço-teto (cara para renda)")
+        razao = 1 / (1 + mb)  # preço ÷ teto
+        partes.append(f"está {_p(1 - razao)} abaixo do preço-teto" if mb >= 0 else f"está {_p(razao - 1)} acima do preço-teto (cara para renda)")
     if i["roe"] == i["roe"]:
         partes.append(f"lucra {_p(i['roe'])} ao ano sobre o patrimônio (ROE)")
     if i["lpa"] == i["lpa"] and i["lpa"] <= 0:

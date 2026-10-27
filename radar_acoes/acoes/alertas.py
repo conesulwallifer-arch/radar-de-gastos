@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 import smtplib
 from datetime import date, timedelta
 from email.mime.text import MIMEText
@@ -17,7 +18,7 @@ def carregar_config() -> None:
     arq = RAIZ / "config.env"
     if not arq.exists():
         return
-    for linha in arq.read_text(encoding="utf-8").splitlines():
+    for linha in arq.read_text(encoding="utf-8-sig").splitlines():  # -sig: aceita arquivo salvo com BOM (Bloco de Notas/Excel)
         if "=" in linha and not linha.lstrip().startswith("#"):
             k, v = linha.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
@@ -80,7 +81,7 @@ def gerar(atual: pd.DataFrame, anterior: pd.DataFrame | None, noticias: dict[str
                 dex = date.fromisoformat(ex)
                 if hoje <= dex <= hoje + timedelta(days=10) and (r["nota"] >= 55 or t in carteira):
                     add(1, "Data-com", t, f"{t}: data-ex em {dex:%d/%m}. Para receber o provento, compre até o pregão anterior "
-                                          f"({(dex - timedelta(days=1)):%d/%m}).")
+                                          f"({(pd.Timestamp(dex) - pd.offsets.BDay(1)):%d/%m}).")
             except ValueError:
                 pass
         # Balanço chegando (antecipação: resultado mexe com preço e com proventos)
@@ -133,15 +134,47 @@ def enviar_telegram(texto: str) -> bool:
     if not token or not chat:
         return False
     ok = True
-    for i in range(0, len(texto), 3900):  # limite de 4096 caracteres por mensagem
-        try:
-            r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                              data={"chat_id": chat, "text": texto[i:i + 3900], "disable_web_page_preview": "true"}, timeout=20)
-            ok &= r.ok
-        except requests.RequestException as e:
-            print(f"  [telegram] falhou: {e}")
-            ok = False
+    for parte in _partes(texto, 3900):  # limite de 4096 caracteres por mensagem; corta entre linhas
+        enviado = False
+        for tentativa in range(3):
+            try:
+                r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                                  data={"chat_id": chat, "text": parte, "disable_web_page_preview": "true"}, timeout=20)
+            except requests.RequestException as e:
+                print(f"  [telegram] falhou (tentativa {tentativa + 1}): {e}")
+                time.sleep(2 * (tentativa + 1))
+                continue
+            if r.ok:
+                enviado = True
+                break
+            print(f"  [telegram] erro {r.status_code}: {r.text[:200]}")
+            if r.status_code == 429:  # muitas mensagens: o Telegram diz quanto esperar
+                try:
+                    time.sleep(int(r.json().get("parameters", {}).get("retry_after", 3)) + 1)
+                except Exception:  # noqa: BLE001
+                    time.sleep(3)
+                continue
+            break  # 400/401/403: token ou chat errado — repetir não resolve
+        ok &= enviado
     return ok
+
+
+def _partes(texto: str, limite: int) -> list[str]:
+    partes, atual = [], ""
+    for linha in texto.splitlines(keepends=True):
+        while len(linha) > limite:  # linha gigante: corta no limite
+            if atual:
+                partes.append(atual)
+                atual = ""
+            partes.append(linha[:limite])
+            linha = linha[limite:]
+        if len(atual) + len(linha) > limite:
+            partes.append(atual)
+            atual = ""
+        atual += linha
+    if atual.strip():
+        partes.append(atual)
+    return partes
 
 
 def enviar_email(assunto: str, texto: str) -> bool:

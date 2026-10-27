@@ -9,7 +9,7 @@ Rotina da equipe (horário de Brasília):
 - ao ligar: se perdeu alguma apuração (computador desligado), faz na hora para não começar o dia com dado velho;
 - dias úteis, 10h–18h: a cada 1 hora, apuração completa com preços novos (ranking, previsões, mesa, alertas no painel);
   entre uma e outra, Rex e Téo conferem os preços das melhores ações e da sua carteira a cada 30 min;
-- dias úteis, 18h30: reunião completa — coleta, notas, 10 especialistas, verificação cruzada, Atlas, relatório;
+- dias úteis, 18h30: reunião completa — coleta, notas, 11 especialistas, verificação cruzada, Atlas, relatório;
 - sábado, 10h: reunião semanal com o placar da equipe e o que mudou na semana.
 Tudo o que fazem fica no diário da equipe (aba 🧠 Sala dos Agentes) e o importante chega no seu Telegram.
 """
@@ -120,7 +120,7 @@ def minutos_desde_ultima_apuracao() -> float:
 
 def apuracao_horaria() -> None:
     """Durante o pregão: tudo de novo com preços frescos. Sem relatório no Telegram (só o das 18h30 e os alertas
-    do vigia) e sem IA paga (as regras dos 10 especialistas rodam; a IA entra na reunião das 18h30)."""
+    do vigia) e sem IA paga (as regras dos 11 especialistas rodam; a IA entra na reunião das 18h30)."""
     _INICIO_ULTIMA.append(time.time())
     print(f"[{agora():%d/%m %H:%M}] 🪙 Apuração da hora (preços novos)...")
     escritorio.registrar("aurum", "convocou a equipe para a apuração da hora, com preços novos do pregão")

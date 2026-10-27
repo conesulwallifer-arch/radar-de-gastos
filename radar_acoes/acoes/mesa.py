@@ -1,4 +1,4 @@
-"""Mesa de analistas: dez agentes especialistas analisam cada ação, votam e o AURUM consolida o consenso.
+"""Mesa de analistas: onze agentes especialistas analisam cada ação, votam e o AURUM consolida o consenso.
 
 Cada agente olha a ação por um ângulo e devolve um voto de -2 (fortemente contra) a +2 (fortemente a favor),
 com os argumentos. O Gestor de Risco pode VETAR (ex.: prejuízo, dado duvidoso, notícia grave).
@@ -373,9 +373,44 @@ class Conjunto(Agente):
         return o
 
 
+NOMES_FATOR = {"dolar": "o dólar", "petroleo": "o petróleo", "minerio": "o minério de ferro", "juros_eua": "os juros dos EUA"}
+
+
+class Macro(Agente):
+    id, nome, icone, peso = "macro", "Analista de Política e Macro", "🌎", 0.5
+    apelido = "Helena"
+    especialidade = "Governo, juros, câmbio, commodities e relações exteriores: quem ganha e quem perde com o cenário."
+
+    def avaliar(self, r, ctx):
+        o = Opiniao()
+        x = ctx.get("cenario", {}).get(r["ticker"])
+        if not x:
+            o.argumentos.append("Sem dados suficientes para medir a reação desta ação ao cenário.")
+            return o
+        sens = []
+        for k, nome in NOMES_FATOR.items():
+            b, t = x.get(f"beta_{k}"), x.get(f"t_{k}")
+            if _ok(b) and _ok(t) and abs(t) >= 2:
+                sens.append(f"{'sobe' if b > 0 else 'cai'} quando {nome} sobe (sensibilidade {b:+.2f})".replace(".", ","))
+        o.argumentos.append("Reação ao cenário: " + ("; ".join(sens) + "." if sens else "nenhuma dependência clara de dólar, petróleo, minério ou juros dos EUA."))
+        v, motor = x.get("vento"), x.get("motor")
+        if _ok(v) and v != 0 and motor:
+            o.argumentos.append(f"Com o que {NOMES_FATOR.get(motor, motor)} fez nos últimos 3 meses, o vento está "
+                                f"{'a favor' if v > 0 else 'contra'} ({_p(v)}).")
+        if ctx.get("fator_macro", 0) <= 0:
+            o.argumentos.append("No teste sem colar, o vento macro ainda não provou vantagem: informo, mas não voto.")
+            return o
+        q = x.get("vento_quintil")
+        if _ok(q) and q > 0.8 and _ok(v) and v > 0:
+            o.add(1, "Entre as 20% com mais vento macro a favor — o grupo que, no teste, rendeu mais que o resto.")
+        elif _ok(q) and q <= 0.2 and _ok(v) and v < 0:
+            o.add(-1, "Entre as 20% com mais vento macro contra: cenário desfavorável para os próximos meses.")
+        return o
+
+
 AGENTES: list[Agente] = [Renda(), Fundamentos(), Valuation(), Tendencia(), Noticias(), Previsor(), Risco(),
-                         Proventos(), Entrada(), Conjunto()]
-ESTATISTICOS = {"previsor", "proventos", "entrada", "conjunto"}  # previsões numéricas: a IA não revisa estes
+                         Proventos(), Entrada(), Conjunto(), Macro()]
+ESTATISTICOS = {"previsor", "proventos", "entrada", "conjunto", "macro"}  # previsões numéricas: a IA não revisa estes
 POR_ID = {a.id: a for a in AGENTES}
 
 
@@ -510,7 +545,8 @@ def _pesquisar_noticias(cand: pd.DataFrame) -> str | None:
 def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previsoes: pd.DataFrame | None = None,
             fator_previsor: float = 0.0, carteira: pd.DataFrame | None = None, data: str = "",
             usar_ia: bool = True, n_ia: int = 8, progresso=None, aprendizado: dict | None = None,
-            cerebro: dict | None = None, oraculos: pd.DataFrame | None = None, fator_sofia: float = 0.0) -> dict:
+            cerebro: dict | None = None, oraculos: pd.DataFrame | None = None, fator_sofia: float = 0.0,
+            cenario: pd.DataFrame | None = None, fator_macro: float = 0.0) -> dict:
     """Roda todos os agentes em todas as ações. Retorna {'consenso': DataFrame, 'opinioes': {...}, 'log': [...], 'ia': bool}."""
     exposicao = {}
     if carteira is not None and len(carteira):
@@ -529,7 +565,8 @@ def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previso
         orac = {r_["ticker"]: r_.to_dict() for _, r_ in oc.iterrows()}
     ctx = {"precos": precos, "noticias": noticias or {}, "macro": macro or {}, "previsoes": prev_map,
            "fator_previsor": fator_previsor, "exposicao_setor": exposicao, "data": data, "memoria": {},
-           "oraculos": orac, "fator_sofia": fator_sofia}
+           "oraculos": orac, "fator_sofia": fator_sofia, "fator_macro": fator_macro,
+           "cenario": ({r_["ticker"]: r_.to_dict() for _, r_ in cenario.iterrows()} if cenario is not None and len(cenario) else {})}
     pa = (cerebro or {}).get("por_agente")
     if pa is not None and len(pa):
         for _, m in pa.iterrows():

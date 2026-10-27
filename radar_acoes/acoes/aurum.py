@@ -100,6 +100,7 @@ def contexto(R: dict, pl: dict | None = None, cart: pd.DataFrame | None = None) 
         "previsora_iris": _iris(R),
         "equipe_previsibilidade": _previsibilidade(R),
         "mesa_trading": _trading(R),
+        "cenario_helena": _cenario(R),
         "atlas_explorador": (R.get("atlas") or {}).get("relatorio"),
         "noticias_recentes": {t: [f"{n['titulo']} ({n['fonte']}, tom {n['tom']})" for n in v[:4]]
                               for t, v in (R.get("noticias") or {}).items() if t in {x["ticker"] for _, x in rk.head(10).iterrows()}},
@@ -139,6 +140,33 @@ def _trading(R: dict) -> dict | None:
             "sinais_hoje": [{"ticker": r["ticker"], "padrao": r["padrao_nome"], "status": r["status"], "entrada": _arred(r["preco"]),
                              "stop": _arred(r["stop"]), "alvo": _arred(r["alvo"]), "barata": bool(r["barata"])}
                             for _, r in (sin.head(8).iterrows() if sin is not None and len(sin) else [])]}
+
+
+def _cenario(R: dict) -> dict | None:
+    c = R.get("cenario") or {}
+    if not c.get("movimentos") and not c.get("temas"):
+        return None
+    clima = c.get("clima")
+    setores = c.get("setores")
+    return {"movimentos_3m": {k: _arred(v, 4) for k, v in (c.get("movimentos") or {}).items()},
+            "clima_noticias": clima.to_dict("records") if clima is not None and len(clima) else [],
+            "setores_vento_a_favor": setores.head(3)["setor"].tolist() if setores is not None and len(setores) else [],
+            "setores_vento_contra": setores.tail(3)["setor"].tolist() if setores is not None and len(setores) else [],
+            "manchetes": {t: [x["titulo"] for x in v[:3]] for t, v in (c.get("temas") or {}).items()},
+            "leitura_ia": c.get("leitura_ia"), "vento_validado": (c.get("fator") or 0) > 0}
+
+
+def texto_cenario(c: dict) -> str | None:
+    h = c.get("cenario_helena")
+    if not h or not h["movimentos_3m"]:
+        return None
+    nomes = {"ibov": "Ibovespa", "dolar": "dólar", "petroleo": "petróleo", "minerio": "minério", "juros_eua": "juros dos EUA"}
+    movs = ", ".join(f"{nomes.get(k, k)} {v * 100:+.1f}{' p.p.' if k == 'juros_eua' else '%'}".replace(".", ",")
+                     for k, v in h["movimentos_3m"].items() if v is not None)
+    txt = f"🌎 Helena (cenário, 3 meses): {movs}."
+    if h["setores_vento_a_favor"]:
+        txt += f" Vento a favor: {', '.join(h['setores_vento_a_favor'])}; contra: {', '.join(h['setores_vento_contra'])}."
+    return txt
 
 
 def texto_trading(c: dict) -> str:
@@ -233,10 +261,13 @@ def relatorio_regras(c: dict) -> list[str]:
     linhas.append(f"🏦 Cenário: Selic {_p(mac['selic'], 2)}, inflação {_p(mac['ipca_12m'])}. Para comparação, {cmp}"
                   + (" (taxas estimadas: Banco Central fora do ar)" if mac["estimado"] else ""))
     if c.get("mesa_de_analistas"):
-        linhas.append(f"🧠 Mesa de analistas (Dora, Fausto, Vitória, Téo, Nina, Íris, Rex, Otto, Bento e Sofia): {c['mesa_de_analistas']['resumo']}.")
+        linhas.append(f"🧠 Mesa de analistas (Dora, Fausto, Vitória, Téo, Nina, Íris, Rex, Otto, Bento, Sofia e Helena): {c['mesa_de_analistas']['resumo']}.")
     tp = texto_previsibilidade(c)
     if tp:
         linhas.append(tp)
+    tc = texto_cenario(c)
+    if tc:
+        linhas.append(tc)
     if c.get("previsora_iris"):
         linhas.append(texto_iris(c))
     if c.get("atlas_explorador"):
@@ -271,6 +302,15 @@ def responder_regras(pergunta: str, c: dict, R: dict) -> str:
     q = pergunta.lower()
     rk: pd.DataFrame = R["ranking"]
     t = _acha_ticker(pergunta, rk["ticker"].tolist())
+    if any(k in q for k in ("governo", "politic", "eleic", "cenario", "cenário", "dolar", "dólar", "china", "eua", "estados unidos",
+                            "tarifa", "petroleo", "petróleo", "fiscal", "imposto")) and not t:
+        txt = texto_cenario(c) or "A Helena ainda não leu o cenário: faça uma apuração."
+        h = c.get("cenario_helena") or {}
+        if h.get("leitura_ia"):
+            txt += "\n\n" + h["leitura_ia"]
+        elif h.get("manchetes"):
+            txt += " Manchetes: " + "; ".join(f"[{t_}] {v[0]}" for t_, v in h["manchetes"].items() if v)[:900]
+        return txt
     if any(k in q for k in ("trade", "trading", "swing", "operar", "stop", "alvo", "vender com lucro", "curto prazo")) and not t:
         return texto_trading(c)
     if t:

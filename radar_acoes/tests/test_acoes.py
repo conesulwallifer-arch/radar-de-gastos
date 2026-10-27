@@ -293,6 +293,8 @@ def test_atlas_regras_e_limites(tmp_path, monkeypatch):
         r = json.loads(f.executar("anotar", {"texto": f"nota {k}", "ticker": ""}))
     assert "erro" in r and len(atlas.ler_notas()) == atlas.MAX_NOTAS_DIA
     atlas.limpar_descobertas(["KEPL3"])
+    assert atlas.ler_descobertas() == ["KEPL3"]  # uma falha passageira do Yahoo não apaga a descoberta
+    atlas.limpar_descobertas(["KEPL3"], dias_tolerancia=1)  # sem dados por dias seguidos: sai
     assert atlas.ler_descobertas() == []
     assert atlas.explorar(R, None, "", usar_ia=False)["modo"] == "regras"
 
@@ -524,3 +526,101 @@ def test_trading_posicao_e_acompanhamento(tmp_path, monkeypatch):
     assert ac.loc["AAAA3", "resultado_rs"] == pytest.approx(250.0)
     msgs = trading.alertas_operacoes({"AAAA3": 12.5, "BBBB4": 17.5})
     assert len(msgs) == 2 and trading.alertas_operacoes({"AAAA3": 12.5, "BBBB4": 17.5}) == []  # uma vez por dia
+
+
+# ---------------------------------------------------------------- Helena (política e macro)
+from acoes import geopolitica  # noqa: E402
+
+
+def test_helena_mede_sensibilidade_e_nao_vota_sem_prova():
+    rng = np.random.default_rng(1)
+    dias = pd.bdate_range("2016-01-01", "2026-10-15")
+    n = len(dias)
+    lf = {k: np.cumsum(rng.normal(0, v, n)) for k, v in (("ibov", 0.012), ("dolar", 0.008), ("petroleo", 0.02), ("minerio", 0.02))}
+    fat = {k: pd.Series(100 * np.exp(v), index=dias) for k, v in lf.items()}
+    precos = {}
+    for i in range(30):
+        bd = 0.8 if i < 10 else 0.0
+        r = np.diff(lf["ibov"], prepend=0) + bd * np.diff(lf["dolar"], prepend=0) + rng.normal(0, 0.015, n)
+        precos[f"T{i:02d}"] = pd.Series(30 * np.exp(np.cumsum(r)), index=dias)
+    rk = pd.DataFrame({"ticker": list(precos), "setor": ["Exportadora"] * 10 + ["Outros"] * 20})
+    res = geopolitica.rodar(rk, precos, fat, {}, {"selic": 0.15, "ipca_12m": 0.045})
+    tab = res["tabela"].set_index("ticker")
+    exp = tab.loc[[f"T{i:02d}" for i in range(10)]]
+    assert (exp["t_dolar"] > 2).mean() >= 0.8 and exp["beta_dolar"].between(0.4, 1.2).all()  # achou quem depende do dólar
+    assert (tab.loc[[f"T{i:02d}" for i in range(10, 30)], "t_dolar"].abs() > 2).mean() <= 0.2  # e não inventou nos outros
+    assert res["fator"] == 0.0  # fatores aleatórios: o vento não prevê nada, então ela não vota
+    assert set(res["movimentos"]) >= {"ibov", "dolar", "petroleo", "minerio"}
+
+
+# ---------------------------------------------------------------- regressões da auditoria (dados e rotina)
+def test_auditoria_anos_sem_provento_contam_como_zero():
+    prov = pd.Series([1.0, 1.0], index=pd.DatetimeIndex(["2021-06-15", "2025-06-15"]))
+    anual = analise.proventos_por_ano(prov, pd.Timestamp("2026-10-15"), primeiro_ano=2017)
+    assert anual.loc[2022] == 0 and anual.loc[2023] == 0 and anual.loc[2024] == 0
+    assert anual[anual.index >= 2021].mean() == pytest.approx(0.4)  # antes saía 1,0 (preço-teto 2,5× inflado)
+    d = ativo("IRR3")
+    d["proventos"] = prov
+    i = analise.ranking({"IRR3": d}, hoje=HOJE).iloc[0]
+    assert i["proventos_media_5a"] == pytest.approx(0.4)
+
+
+def test_auditoria_sem_lucro_informado_nao_vira_evitar():
+    d = ativo("SEMI3")
+    d["info"] = {k: v for k, v in d["info"].items() if k not in ("trailingEps",)}
+    i = analise.ranking({"SEMI3": d}, hoje=HOJE).iloc[0]
+    assert i["sinal"] != "Evitar"
+
+
+def test_auditoria_carteira_do_excel(tmp_path):
+    arq = tmp_path / "c.csv"
+    arq.write_text("﻿ticker;quantidade;preco_medio\nTAEE11;1.000;35,50\nITSA4;250;9,80\n", encoding="utf-8")
+    c = aporte.ler_carteira(arq).set_index("ticker")
+    assert c.loc["TAEE11", "quantidade"] == 1000 and c.loc["TAEE11", "preco_medio"] == pytest.approx(35.5)
+    arq.write_text("coisa,outra\n1,2\n", encoding="utf-8")
+    assert aporte.ler_carteira(arq).empty  # arquivo estranho: segue sem carteira, não derruba a apuração
+
+
+def test_auditoria_telegram_corta_entre_linhas_e_noticias():
+    texto = "\n".join(f"linha {i} " + "x" * 60 for i in range(200))
+    partes = alertas._partes(texto, 3900)
+    assert all(len(p) <= 3900 for p in partes) and "".join(partes) == texto
+    assert all(p.endswith("\n") or p is partes[-1] for p in partes)
+    assert noticias.classificar("Petrobras eleva geração de caixa e lucro cresce")["tom"] == "positiva"
+    itens = [{"quando": None}, {"quando": pd.Timestamp("2026-10-01").to_pydatetime()}]
+    from datetime import datetime
+    itens.sort(key=lambda x: x["quando"] or datetime.min, reverse=True)  # mesma chave usada no módulo
+
+
+def test_auditoria_coleta_usa_ultimo_cache_bom(tmp_path, monkeypatch):
+    import sys
+    import types
+    from acoes import dados
+    monkeypatch.setattr(dados, "CACHE", tmp_path)
+    bom = {"ticker": "BOM3", "info": {"trailingEps": 1.0, "longName": "Bom"}, "precos": pd.Series([10.0]),
+           "proventos": pd.Series(dtype=float), "demos": {}}
+    with open(tmp_path / "BOM3_20200101.pkl", "wb") as f:
+        import pickle
+        pickle.dump(bom, f)
+
+    class TickerFalho:
+        def __init__(self, *_):
+            pass
+
+        def history(self, **_):
+            idx = pd.bdate_range("2026-01-01", periods=5)
+            return pd.DataFrame({"Close": [11.0] * 5, "Dividends": [0.0] * 5}, index=idx)
+
+        def get_info(self):
+            raise RuntimeError("Too Many Requests")
+
+        def get_income_stmt(self, **_):
+            raise RuntimeError("bloqueado")
+
+        get_balance_sheet = get_cashflow = get_income_stmt
+
+    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(Ticker=TickerFalho))
+    d = dados.coletar("BOM3", forcar=True, tentativas=1)
+    assert d["info"]["trailingEps"] == 1.0 and d["info_antiga"] and float(d["precos"].iloc[-1]) == 11.0
+    (tmp_path / "LIXO3_20260101.pkl").write_bytes(b"corrompido")
+    assert dados._ler(tmp_path / "LIXO3_20260101.pkl") is None and not (tmp_path / "LIXO3_20260101.pkl").exists()

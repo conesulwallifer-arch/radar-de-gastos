@@ -37,7 +37,7 @@ def tickers() -> list[str]:
 def _lista_base() -> list[str]:
     arq = DADOS / "minha_lista.txt"
     if arq.exists():
-        lista = [l.strip().upper() for l in arq.read_text(encoding="utf-8").splitlines()]
+        lista = [l.strip().upper() for l in arq.read_text(encoding="utf-8-sig").splitlines()]
         lista = [l for l in lista if l and not l.startswith("#")]
         if lista:
             return list(dict.fromkeys(lista))

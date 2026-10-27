@@ -166,7 +166,7 @@ if R.get("demo"):
     st.error("⚠️ **MODO DEMONSTRAÇÃO — NÚMEROS FICTÍCIOS.** Nada aqui vale para investir. "
              "Clique em **🔄 Apurar agora (dados reais)** na barra lateral.")
 
-abas = st.tabs(["🪙 AURUM", "📡 Mercado ao vivo", "🔭 Previsões", "⚡ Trading", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
+abas = st.tabs(["🪙 AURUM", "📡 Mercado ao vivo", "🔭 Previsões", "⚡ Trading", "🌎 Governo e Mundo", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
                 "🧪 O sistema funciona?", "🔔 Alertas", "❓ Como funciona e limites"])
 
 # carteira-alvo e números da meta, usados em várias abas
@@ -596,8 +596,82 @@ nem alvo nem stop, sai pelo preço do dia. Custos de {trading.CUSTO * 100:.2f}% 
                 st.dataframe(pr["tabela"], hide_index=True, width="stretch")
 
 
-# ======================================================================= SALA DOS AGENTES
+# ======================================================================= GOVERNO E MUNDO (Helena)
 with abas[4]:
+    cen = R.get("cenario") or {}
+    st.markdown("### 🌎 Governo e Mundo — o cenário a nosso favor")
+    st.caption("A **Helena** acompanha governo, Copom, eleição, EUA, China, petróleo, minério e impostos sobre dividendos, e mede "
+               "**como cada ação reage** a dólar, petróleo, minério e juros dos EUA (descontado o sobe-e-desce da bolsa).")
+    if not cen:
+        st.info("A Helena entra na próxima apuração. Clique em **🔄 Apurar agora** na barra lateral.")
+    else:
+        mov = cen.get("movimentos") or {}
+        nomes_f = {"ibov": "IBOVESPA", "dolar": "DÓLAR", "petroleo": "PETRÓLEO", "minerio": "MINÉRIO", "juros_eua": "JUROS EUA 10A"}
+        if mov:
+            visual.cartoes([(f"{nomes_f.get(k, k)} · 3 MESES",
+                             (f"{v * 100:+.2f} p.p." if k == "juros_eua" else f"{(np.exp(v) - 1) * 100:+.1f}%").replace(".", ","),
+                             "variação", "sobe" if v > 0 else "cai") for k, v in mov.items()])
+        if cen.get("leitura_ia"):
+            st.markdown("#### 🧠 Leitura de cenário da Helena (pesquisa na internet hoje)")
+            visual.fala(cen["leitura_ia"], "🌎 HELENA")
+        st.markdown("#### 📰 O que está saindo no noticiário (últimos 7 dias)")
+        temas = cen.get("temas") or {}
+        clima = cen.get("clima")
+        if not temas or not any(temas.values()):
+            st.info("Sem manchetes coletadas agora (Google Notícias fora do ar ou sem internet).")
+        else:
+            cols_t = st.columns(2)
+            for i, (tema, itens) in enumerate(temas.items()):
+                with cols_t[i % 2]:
+                    pos = sum(1 for x in itens if x["tom"] == "positiva")
+                    neg = sum(1 for x in itens if x["tom"] == "negativa")
+                    termo = "🟢" if pos > neg else "🔴" if neg > pos else "⚪"
+                    with st.expander(f"{termo} {tema} — {len(itens)} manchete(s)"):
+                        for x in itens:
+                            quando = f" · {pd.Timestamp(x['quando']):%d/%m}" if x.get("quando") else ""
+                            link = f"[{x['titulo']}]({x['link']})" if x.get("link") else x["titulo"]
+                            st.markdown(md(f"- {link} — *{x['fonte']}{quando}*"))
+        st.markdown("#### 🧭 Vento macro: quem ganha e quem perde com o que aconteceu")
+        tab_c = cen.get("tabela")
+        val_c = cen.get("validacao") or {}
+        if tab_c is None or not len(tab_c):
+            st.info("Sem dados de dólar/petróleo/minério agora (fonte fora do ar). Tento de novo na próxima apuração.")
+        else:
+            st.caption(("✅ No teste sem colar, o vento macro **provou vantagem** e a Helena vota na mesa."
+                        if (cen.get("fator") or 0) > 0 else
+                        "ℹ️ No teste sem colar, o vento macro **ainda não provou vantagem** para prever (t = "
+                        f"{val_c.get('t_stat', 0):.1f}".replace(".", ",") + "): a Helena informa, mas não vota. Use como mapa de risco.")
+                       + " Vento = sensibilidade da ação × o que o fator fez nos últimos 3 meses.")
+            set_ = cen.get("setores")
+            if set_ is not None and len(set_):
+                gs = set_.assign(vento_pct=set_["vento"] * 100)
+                st.altair_chart(alt.Chart(gs).mark_bar().encode(
+                    x=alt.X("vento_pct:Q", title="Vento macro do setor (%)"), y=alt.Y("setor:N", sort="-x", title=None),
+                    color=alt.condition("datum.vento_pct > 0", alt.value(visual.VERDE), alt.value(visual.VERMELHO)),
+                    tooltip=["setor", alt.Tooltip("vento_pct:Q", format="+.2f", title="Vento (%)"), "acoes"]).properties(height=320), width="stretch")
+            nomes_m = {"dolar": "Dólar", "petroleo": "Petróleo", "minerio": "Minério", "juros_eua": "Juros EUA"}
+            tv = tab_c.copy()
+            tv["vento_pct"] = tv["vento"] * 100
+            tv["motor_txt"] = tv["motor"].map(nomes_m).fillna("—")
+            cols_v = ["ticker", "setor", "vento_pct", "motor_txt"] + [c for c in ("beta_dolar", "beta_petroleo", "beta_minerio", "beta_juros_eua") if c in tv]
+            st.dataframe(tv[cols_v].sort_values("vento_pct", ascending=False), hide_index=True, width="stretch",
+                         column_config={"ticker": "Ação", "setor": "Setor",
+                                        "vento_pct": st.column_config.NumberColumn("Vento (%)", format="%+.2f"),
+                                        "motor_txt": "Principal motor",
+                                        "beta_dolar": st.column_config.NumberColumn("Sens. dólar", format="%+.2f",
+                                                                                    help="+0,5 = quando o dólar sobe 10%, a ação tende a subir 5% a mais que a bolsa."),
+                                        "beta_petroleo": st.column_config.NumberColumn("Sens. petróleo", format="%+.2f"),
+                                        "beta_minerio": st.column_config.NumberColumn("Sens. minério", format="%+.2f"),
+                                        "beta_juros_eua": st.column_config.NumberColumn("Sens. juros EUA", format="%+.2f")})
+        with st.expander("📚 Como cada tema costuma mexer com a bolsa"):
+            from acoes.geopolitica import IMPACTO_TEMAS
+            st.dataframe(pd.DataFrame([{"Tema": k, "Costuma favorecer": a, "Costuma prejudicar": b} for k, (a, b) in IMPACTO_TEMAS.items()]),
+                         hide_index=True, width="stretch")
+            st.caption("Regras gerais de mercado — cada empresa tem particularidades. Use junto com a tabela de sensibilidades acima, que é medida nos dados.")
+
+
+# ======================================================================= SALA DOS AGENTES
+with abas[5]:
     @st.fragment(run_every=20)
     def _sala_ao_vivo():
         """Atualiza sozinho a cada 20 s: dá para ver a equipe trabalhando enquanto o agente roda."""
@@ -634,7 +708,7 @@ with abas[4]:
     else:
         hora_m = pd.Timestamp(M.get("hora") or R["data"])
         st.markdown(md(
-            "Dez especialistas analisam **todas** as ações, cada um pelo seu ângulo, e votam de −2 a +2 (o Bento não vota: ele dá o preço de entrada). Depois, "
+            "Onze especialistas analisam **todas** as ações, cada um pelo seu ângulo, e votam de −2 a +2 (o Bento não vota: ele dá o preço de entrada). Depois, "
             "**um confere o trabalho do outro** (verificação cruzada) e o AURUM só recomenda compra quando a nota do sistema "
             "**e** a equipe concordam (dupla checagem)." + (" Hoje os especialistas também foram revisados por IA." if M.get("ia") else "")))
         ops_all = M["opinioes"]
@@ -774,7 +848,7 @@ with abas[4]:
                        "Cada previsão diária é registrada e conferida 1 mês depois — o placar real aparece acima.")
 
 # ======================================================================= HOJE
-with abas[5]:
+with abas[6]:
     st.subheader(f"Este mês, com {brl(pl['aporte_mensal'])} de aporte, compre:")
     compras, sobra = aporte.sugerir(rk, pl["aporte_mensal"], cart)
     if compras.empty:
@@ -861,7 +935,7 @@ with abas[5]:
         st.caption(f"+ {len(imp) - 8} alertas na aba 🔔 Alertas.")
 
 # ======================================================================= AGENDA
-with abas[6]:
+with abas[7]:
     st.subheader("📅 Quanto você deve receber nos próximos 12 meses")
     compras_ag, _ = aporte.sugerir(rk, pl["aporte_mensal"], cart)
     atual = dict(zip(cart["ticker"], cart["quantidade"])) if len(cart) else {}
@@ -898,7 +972,7 @@ with abas[6]:
                    "Use isto para encaixar compras que você já ia fazer.")
 
 # ======================================================================= META
-with abas[7]:
+with abas[8]:
     st.subheader("🎯 Quanto tempo até a sua meta — e o que te leva mais rápido")
     st.caption("O sistema simula 5.000 futuros possíveis para a bolsa (anos bons e ruins, na proporção do passado) "
                "e mostra a CHANCE de você chegar até cada ano. Ninguém consegue prometer uma data exata.")
@@ -980,7 +1054,7 @@ with abas[7]:
                  hide_index=True, width="stretch")
 
 # ======================================================================= RANKING
-with abas[8]:
+with abas[9]:
     st.caption("Todas as ações acompanhadas, da melhor para a pior para quem quer **renda + patrimônio no longo prazo**. "
                "Passe o mouse no título de cada coluna para ver o que significa.")
     f1, f2, f3 = st.columns([2, 2, 1])
@@ -1034,7 +1108,7 @@ with abas[8]:
         st.caption(f"Sem dados nesta apuração (código pode ter mudado na B3): {', '.join(R['sem_dados'])}")
 
 # ======================================================================= EMPRESA
-with abas[9]:
+with abas[10]:
     nomes = rk.set_index("ticker")["nome"]
     t = st.selectbox("Escolha a empresa", rk["ticker"], format_func=lambda x: f"{x} — {nomes[x]}")
     r = rk.set_index("ticker").loc[t]
@@ -1156,7 +1230,7 @@ with abas[9]:
                      hide_index=True, width="stretch")
 
 # ======================================================================= CARTEIRA
-with abas[10]:
+with abas[11]:
     st.markdown("**Minha carteira** — digite as ações que você já tem e clique em Salvar. "
                 "O aporte do mês passa a completar o que está abaixo do alvo, e os alertas acompanham as suas ações.")
     base_cart = cart if not cart.empty else pd.DataFrame({"ticker": pd.Series(dtype=str), "quantidade": pd.Series(dtype=float),
@@ -1186,7 +1260,7 @@ with abas[10]:
         st.caption("'Evitar' numa ação que você já tem não é ordem de venda: é um sinal para olhar as notícias e os resultados.")
 
 # ======================================================================= BACKTEST
-with abas[11]:
+with abas[12]:
     bt = R.get("backtest")
     st.subheader("🧪 E se você tivesse seguido o sistema nos últimos 5 anos?")
     if not bt:
@@ -1220,7 +1294,7 @@ with abas[11]:
             st.dataframe(bt["compras"].iloc[::-1], hide_index=True, width="stretch")
 
 # ======================================================================= ALERTAS
-with abas[12]:
+with abas[13]:
     if not R["alertas"]:
         st.success("Nenhum alerta hoje.")
     icones = {"Oportunidade": "🟢", "Queda forte": "📉", "Provento": "💰", "Data-com": "📅", "Ranking": "🏆",
@@ -1232,7 +1306,7 @@ with abas[12]:
             (st.warning if a["nivel"] == 1 else st.info)(md(f"{icones.get(a['tipo'], '•')} **{a['tipo']}** — {a['texto']}"))
 
 # ======================================================================= COMO FUNCIONA
-with abas[13]:
+with abas[14]:
     st.markdown("""
 ### De onde vêm os dados (todos reais e atualizados a cada apuração)
 - **Cotações, proventos (dividendos + JCP) e balanço**: Yahoo Finance. A data da última cotação aparece no topo.

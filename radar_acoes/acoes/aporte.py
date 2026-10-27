@@ -10,17 +10,44 @@ from . import DADOS
 ARQ_CARTEIRA = DADOS / "carteira.csv"  # colunas: ticker,quantidade[,preco_medio]
 
 
+def _numero(serie: pd.Series) -> pd.Series:
+    """Aceita 1000, 1.000, 1.000,50, 35,50 e 35.50 (Excel em português ou inglês)."""
+    def um(v):
+        t = str(v).strip().replace("R$", "").replace(" ", "")
+        if t in ("", "nan", "None"):
+            return float("nan")
+        if "," in t:                      # vírgula decimal: o ponto é separador de milhar
+            t = t.replace(".", "").replace(",", ".")
+        elif t.count(".") > 1 or (t.count(".") == 1 and len(t.split(".")[1]) == 3 and t.split(".")[0].lstrip("-").isdigit()
+                                  and len(t.split(".")[0].lstrip("-")) <= 3 and float(t.replace(".", "")) >= 1000):
+            t = t.replace(".", "")        # 1.000 / 12.500 = milhar
+        try:
+            return float(t)
+        except ValueError:
+            return float("nan")
+    return serie.map(um)
+
+
 def ler_carteira(caminho=None) -> pd.DataFrame:
+    """Lê a carteira (CSV de vírgula ou ponto e vírgula, com ou sem BOM do Excel). Nunca derruba a apuração:
+    se o arquivo estiver estranho, avisa e segue com a carteira vazia."""
     arq = caminho or ARQ_CARTEIRA
+    vazio = pd.DataFrame(columns=["ticker", "quantidade", "preco_medio"])
     try:
-        df = pd.read_csv(arq, sep=None, engine="python")
+        df = pd.read_csv(arq, sep=None, engine="python", encoding="utf-8-sig", dtype=str)
     except (FileNotFoundError, pd.errors.EmptyDataError):
-        return pd.DataFrame(columns=["ticker", "quantidade", "preco_medio"])
-    df.columns = [c.strip().lower() for c in df.columns]
+        return vazio
+    except Exception as e:  # noqa: BLE001
+        print(f"  [aviso] não consegui ler a carteira ({e}); seguindo sem ela.")
+        return vazio
+    df.columns = [str(c).strip().lower().replace("\ufeff", "") for c in df.columns]
+    if "ticker" not in df or "quantidade" not in df:
+        print("  [aviso] a carteira precisa das colunas ticker e quantidade; seguindo sem ela.")
+        return vazio
     df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
-    df["quantidade"] = pd.to_numeric(df["quantidade"], errors="coerce").fillna(0)
-    if "preco_medio" not in df:
-        df["preco_medio"] = float("nan")
+    df = df[df["ticker"].str.len() >= 4]
+    df["quantidade"] = _numero(df["quantidade"]).fillna(0)
+    df["preco_medio"] = _numero(df["preco_medio"]) if "preco_medio" in df else float("nan")
     return df.groupby("ticker", as_index=False).agg(quantidade=("quantidade", "sum"), preco_medio=("preco_medio", "mean"))
 
 

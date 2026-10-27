@@ -19,7 +19,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, escritorio, dados, demo, aurum, macro, memoria, mesa, meta, noticias, oraculos, plano, previsao, previsor, trading, universo  # noqa: E402
+from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, escritorio, dados, demo, aurum, geopolitica, macro, memoria, mesa, meta, noticias, oraculos, plano, previsao, previsor, trading, universo  # noqa: E402
 
 HIST = DADOS / "historico"
 REL = DADOS / "relatorios"
@@ -38,6 +38,24 @@ def print(*args, **kwargs):  # noqa: A001 — mensagens de acompanhamento nunca 
         pass
 
 
+FALHAS: list[str] = []  # etapas que falharam nesta apuração (aparecem no relatório; nada derruba a apuração inteira)
+
+
+def _seguro(nome: str, fn, padrao):
+    """Roda uma etapa; se falhar, registra, avisa e segue com um resultado neutro."""
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001
+        msg = f"{nome}: {type(e).__name__}: {str(e)[:160]}"
+        print(f"  [aviso] etapa com problema — {msg}")
+        FALHAS.append(msg)
+        try:
+            escritorio.registrar("aurum", f"uma etapa falhou e foi contornada ({nome}); o resto da apuração seguiu")
+        except Exception:  # noqa: BLE001
+            pass
+        return padrao
+
+
 def _br(x: float) -> str:
     return f"R$ {x:.2f}"
 
@@ -54,6 +72,8 @@ def anterior(hoje: date) -> pd.DataFrame | None:
 def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = False, com_noticias: bool = True,
            enviar: bool = True, forcar: bool = False, usar_ia: bool = True, progresso=None) -> dict:
     falar = progresso or (lambda m: None)
+    FALHAS.clear()
+    enviar = enviar and not usar_demo  # dados fictícios nunca saem no Telegram/e-mail
     escritorio.SILENCIOSO = usar_demo
     escritorio.status("aurum", "trabalhando", "coordenando a apuração do dia")
     hoje = date.today()
@@ -69,13 +89,15 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     base = {t: demo.gerar(t) for t in tickers} if usar_demo else dados.coletar_varios(tickers, forcar=forcar)
     sem_dados = [t for t in tickers if t not in base]
     if not usar_demo:
-        atlas.limpar_descobertas(sem_dados)  # propostas do Atlas sem dados no Yahoo saem da lista
+        atlas.limpar_descobertas(sem_dados)  # propostas do Atlas sem dados por vários dias seguidos saem da lista
     if not base:
         raise SystemExit("Nenhum dado coletado. Verifique a internet (ou rode com --demo).")
 
     print("2/5 Calculando indicadores e notas...")
-    selic_hoje = macro.indicadores()["selic"]  # usado no preço justo por dividendos descontados
+    selic_hoje = _seguro("Selic", lambda: macro.indicadores()["selic"], 0.15)  # usado no preço justo por dividendos descontados
     rk = analise.ranking(base, selic=selic_hoje)
+    if rk.empty:
+        raise SystemExit("Nenhuma ação com dados suficientes para analisar. Verifique a internet e tente de novo.")
 
     print("3/5 Buscando notícias...")
     falar("📰 Buscando as notícias das 30 primeiras e da sua carteira...")
@@ -85,8 +107,10 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
         for t in alvo:
             if t in base:
                 nome = base[t]["info"].get("shortName") or base[t]["info"].get("longName")
-                news[t] = demo.noticias(t) if usar_demo else noticias.buscar(t, nome, dias=30)
-        rk = analise.ranking(base, {t: noticias.resumo(v)["saldo"] for t, v in news.items()}, selic=selic_hoje)
+                news[t] = demo.noticias(t) if usar_demo else _seguro(f"notícias de {t}", lambda: noticias.buscar(t, nome, dias=30), [])
+        rk2 = _seguro("ranking com notícias", lambda: analise.ranking(base, {t: noticias.resumo(v)["saldo"] for t, v in news.items()},
+                                                                     selic=selic_hoje), None)
+        rk = rk2 if rk2 is not None and len(rk2) else rk
 
     print("4/5 Fazendo previsões...")
     falar("📊 Calculando previsões de proventos e de preço (1, 3 e 5 anos)...")
@@ -96,17 +120,19 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
             prev.append({"ticker": r["ticker"], **previsao.prever(r.to_dict(), base[r["ticker"]]["precos"])})
         except Exception as e:  # noqa: BLE001
             print(f"  [aviso] previsão de {r['ticker']}: {e}")
-    rk = rk.merge(pd.DataFrame(prev), on="ticker", how="left")
+    if prev:
+        rk = rk.merge(pd.DataFrame(prev), on="ticker", how="left")
 
     print("5/5 Juros (Banco Central), teste no passado, meta e alertas...")
     falar("🏦 Consultando Selic e inflação no Banco Central e refazendo o teste dos últimos 5 anos...")
-    mac = macro.indicadores()
-    mac["focus"] = macro.expectativas()
-    mac["leitura_juros"] = macro.leitura_juros(mac["selic"], mac["focus"])
+    mac = _seguro("Banco Central", macro.indicadores, {"selic": 0.15, "ipca_12m": 0.045, "cdi_liquido": 0.12, "estimado": True,
+                                                       "data_selic": None, "data_ipca": None})
+    mac["focus"] = _seguro("Boletim Focus", macro.expectativas, {})
+    mac["leitura_juros"] = _seguro("leitura dos juros", lambda: macro.leitura_juros(mac["selic"], mac["focus"]), None)
     if mac["leitura_juros"]:
         escritorio.registrar("risco", "leu o Boletim Focus: " + mac["leitura_juros"].split(". ")[0])
-    ibov = demo.gerar("BOVA11")["precos"] if usar_demo else (dados.coletar("BOVA11", forcar=forcar) or {}).get("precos")
-    cdi, cdi_real = macro.cdi_mensal(date(hoje.year - 6, 1, 1))
+    ibov = demo.gerar("BOVA11")["precos"] if usar_demo else _seguro("Ibovespa", lambda: (dados.coletar("BOVA11", forcar=forcar) or {}).get("precos"), None)
+    cdi, cdi_real = _seguro("CDI", lambda: macro.cdi_mensal(date(hoje.year - 6, 1, 1)), (None, False))
     try:
         bt = backtest.rodar(base, anos=5, aporte=valor_aporte or 1000.0, cdi=cdi, ibov=ibov)
         bt["cdi_real"] = cdi_real
@@ -126,11 +152,11 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     print("🔮 Previsor: chance de alta/queda no próximo mês + teste de acerto no passado...")
     falar("🔮 **Íris** está calculando a chance de alta/queda no próximo mês e conferindo o próprio placar de acertos...")
     precos_base = {t: d["precos"] for t, d in base.items()}
-    prev_cp = previsor.prever_todas(precos_base)
-    validacao = previsor.validar_historico(precos_base)
+    prev_cp = _seguro("Íris (previsões)", lambda: previsor.prever_todas(precos_base), pd.DataFrame())
+    validacao = _seguro("Íris (teste)", lambda: previsor.validar_historico(precos_base), {"n": 0})
     validacao.pop("casos", None)
-    prev_cal, fator = previsor.calibrar(prev_cp, validacao)
-    if len(prev_cp):
+    prev_cal, fator = _seguro("Íris (calibragem)", lambda: previsor.calibrar(prev_cp, validacao), (pd.DataFrame(), 0.0))
+    if len(prev_cp) and len(prev_cal):
         if not usar_demo:  # dados fictícios nunca entram no placar real
             previsor.registrar(prev_cp.assign(direcao=prev_cp["prob_alta"].map(previsor.direcao)),
                                dict(zip(rk["ticker"], rk["preco"])), hoje)
@@ -138,7 +164,7 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
                       .rename(columns={"prob_alta": "prob_alta_1m", "prob_bruta": "prob_alta_1m_bruta", "direcao": "direcao_1m",
                                        "ret_mediano": "ret_mediano_1m", "ret_p10": "ret_p10_1m", "ret_p90": "ret_p90_1m"}),
                       on="ticker", how="left")
-    placar = previsor.placar_real(precos_base)
+    placar = _seguro("Íris (placar)", lambda: previsor.placar_real(precos_base), {})
     proventos_base = {t: d["proventos"] for t, d in base.items()}
 
     print("🔭 Equipe de previsibilidade: Otto (proventos), Bento (entrada) e Sofia (modelo conjunto)...")
@@ -166,21 +192,54 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
                                           + ("vai votar" if fator_sofia > 0 else "não bateu o chute, não vota")).replace(".", ","))
     escritorio.status(["proventos", "entrada", "conjunto"], "pausa", "previsões do dia entregues")
 
-    print("🧠 Mesa de analistas: 10 agentes analisando cada ação...")
+    print("🌎 Helena: governo, juros, câmbio, commodities e exterior...")
+    falar("🌎 **Helena** está lendo o noticiário de governo, Copom, EUA, China e impostos, e medindo como cada ação reage a dólar, petróleo e minério...")
+    escritorio.status("macro", "trabalhando", "lendo o cenário político e econômico")
+    try:
+        if usar_demo:
+            fat = {"ibov": demo.gerar("BOVA11")["precos"], "dolar": demo.gerar("FX_DOLAR")["precos"],
+                   "petroleo": demo.gerar("FX_BRENT")["precos"], "minerio": demo.gerar("FX_MINERIO")["precos"]}
+            temas = {t: [{"titulo": f"[DEMO] Manchete fictícia sobre {t.lower()}", "fonte": "Notícia fictícia", "quando": None,
+                          "link": "", **noticias.classificar(f"manchete sobre {t}")}] for t in geopolitica.TEMAS}
+        else:
+            fat = geopolitica.baixar_fatores(forcar=forcar)
+            temas = geopolitica.noticias_temas()
+        cen = geopolitica.rodar(rk, precos_base, fat, temas, mac, usar_ia=usar_ia and not usar_demo)
+    except Exception as e:  # noqa: BLE001 — o cenário nunca derruba a apuração
+        print(f"  [aviso] Helena (cenário): {e}")
+        cen = {"tabela": pd.DataFrame(), "setores": pd.DataFrame(), "movimentos": {}, "validacao": {"n": 0}, "fator": 0.0,
+               "clima": pd.DataFrame(), "temas": {}, "leitura_ia": None}
+    if len(cen["tabela"]):
+        rk = rk.merge(cen["tabela"][["ticker", "vento", "motor"]].rename(columns={"vento": "vento_macro", "motor": "motor_macro"}),
+                      on="ticker", how="left")
+    vm = cen["validacao"]
+    escritorio.registrar("macro", f"leu {sum(len(v) for v in cen['temas'].values())} manchetes de {len(cen['temas'])} temas e mediu a sensibilidade "
+                         f"de {len(cen['tabela'])} ações a dólar, petróleo, minério e juros dos EUA"
+                         + (f"; no teste de {vm['meses']} meses, o vento macro {'provou' if cen['fator'] > 0 else 'não provou'} vantagem" if vm.get("n") else ""))
+    escritorio.status("macro", "pausa", "cenário do dia entregue")
+
+    print("🧠 Mesa de analistas: 11 agentes analisando cada ação...")
     falar("🧠 Cada agente está consultando a própria memória (votos passados × o que aconteceu de verdade)...")
-    cerebro = memoria.avaliar(precos_base, proventos_base)
-    aprendizado = memoria.fatores(cerebro)
+    cerebro = _seguro("memória dos agentes", lambda: memoria.avaliar(precos_base, proventos_base),
+                      {"por_agente": pd.DataFrame(), "votos_guardados": 0, "desde": None, "pendentes": 0})
+    aprendizado = _seguro("pesos aprendidos", lambda: memoria.fatores(cerebro), {})
     falar("🧠 Reunião da mesa de analistas começou.")
-    reuniao = mesa.reuniao(rk, precos_base, news, mac, prev_cal, fator, cart, str(hoje), usar_ia=usar_ia,
-                           progresso=falar, aprendizado=aprendizado, cerebro=cerebro,
-                           oraculos=orac["tabela"], fator_sofia=fator_sofia)
+    reuniao = _seguro("mesa de analistas", lambda: mesa.reuniao(
+        rk, precos_base, news, mac, prev_cal, fator, cart, str(hoje), usar_ia=usar_ia, progresso=falar, aprendizado=aprendizado,
+        cerebro=cerebro, oraculos=orac["tabela"], fator_sofia=fator_sofia, cenario=cen["tabela"], fator_macro=cen["fator"]), None)
+    if reuniao is None:  # mesa falhou: ninguém vota, ninguém veta, e o relatório avisa
+        reuniao = {"consenso": pd.DataFrame({"ticker": rk["ticker"], "placar": 0.0, "consenso": "Neutro", "a_favor": 0, "contra": 0,
+                                             "vetado": False, "vetado_por": ""}),
+                   "opinioes": {}, "log": ["⚠️ A mesa de analistas não conseguiu se reunir hoje (veja o aviso)."], "ia": False,
+                   "fator_previsor": fator, "verificacoes": [], "aprendizado": {}, "hora": ""}
     reuniao["cerebro"] = cerebro
     if not usar_demo:  # dados fictícios nunca entram na memória dos agentes
         # a decisão da EQUIPE também vai para a memória: é assim que se mede se o time está acertando
         nota_eq = {"Compra forte": 2, "Compra": 1, "Neutro": 0, "Evitar": -1, "Vetado": -2}
         cons_eq = reuniao["consenso"].set_index("ticker")["consenso"]
         votos_mem = {t: {**ops, "equipe": {"voto": nota_eq.get(cons_eq.get(t), 0)}} for t, ops in reuniao["opinioes"].items()}
-        memoria.registrar(votos_mem, dict(zip(rk["ticker"], rk["preco"])), hoje)
+        if votos_mem:
+            _seguro("memória (gravar votos)", lambda: memoria.registrar(votos_mem, dict(zip(rk["ticker"], rk["preco"])), hoje), None)
     rk = rk.merge(reuniao["consenso"], on="ticker", how="left")
     for linha in reuniao["log"]:
         print("   " + linha)
@@ -215,9 +274,10 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
         tr = {"padroes": pd.DataFrame(), "chute": {}, "sinais": pd.DataFrame(), "placar_real": {"n": 0}, "n_operacoes": 0}
     escritorio.status("trading", "pausa", "sinais do dia entregues")
 
-    alts = alertas.gerar(rk, anterior(hoje), news, carteira=cart["ticker"].tolist())
-    compras, sobra = aporte.sugerir(rk, valor_aporte, cart) if valor_aporte > 0 else (pd.DataFrame(), 0.0)
-    texto = alertas.texto_resumo(rk, alts, compras, sobra=sobra)
+    alts = _seguro("alertas", lambda: alertas.gerar(rk, anterior(hoje), news, carteira=cart["ticker"].tolist()), [])
+    compras, sobra = (_seguro("sugestão de compras", lambda: aporte.sugerir(rk, valor_aporte, cart), (pd.DataFrame(), 0.0))
+                      if valor_aporte > 0 else (pd.DataFrame(), 0.0))
+    texto = _seguro("resumo", lambda: alertas.texto_resumo(rk, alts, compras, sobra=sobra), "Resumo indisponível hoje (veja o painel).")
     datas = rk["data_cotacao"].dropna()
     cab = [f"Cotações de {pd.Timestamp(datas.max()):%d/%m/%Y} (Yahoo Finance)." if len(datas) else "",
            f"Selic {_tx(mac['selic'])} · IPCA 12m {_tx(mac['ipca_12m'])} · renda fixa líquida ≈ {_tx(mac['cdi_liquido'])} a.a."
@@ -244,27 +304,36 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
                  "info": {t: d["info"] for t, d in base.items()},
                  "macro": mac, "backtest": bt, "carteira_esperada": cart_esp, "ibov": ibov,
                  "mesa": reuniao, "previsor": {"validacao": validacao, "fator": fator, "placar_real": placar},
-                 "oraculos": orac["placar"], "trading": tr}
+                 "oraculos": orac["placar"], "trading": tr, "cenario": cen}
     print("🪙 AURUM escrevendo o relatório do dia" + (" (IA + pesquisa na web)..." if usar_ia and aurum.ia_disponivel() else "..."))
     falar("🧭 **Atlas** (explorador autônomo) está decidindo por conta própria o que investigar...")
     resumo_atlas = mesa.resumo_texto(reuniao) + "\n" + "\n".join(
         f"{int(r['posicao'])}. {r['ticker']} nota {r['nota']:.0f} sinal {r['sinal']} consenso {r.get('consenso')}"
         for _, r in rk.head(15).iterrows())
-    resultado["atlas"] = atlas.explorar(resultado, anterior(hoje), resumo_atlas, usar_ia=usar_ia)
+    resultado["atlas"] = _seguro("Atlas", lambda: atlas.explorar(resultado, anterior(hoje), resumo_atlas, usar_ia=usar_ia),
+                                 {"diario": [], "alertas": [], "relatorio": "O Atlas não conseguiu explorar hoje."})
     for passo in resultado["atlas"]["diario"]:
         falar("   🧭 Atlas " + passo)
     resultado["alertas"] = sorted(alts + resultado["atlas"]["alertas"], key=lambda a: (a["nivel"], a["ticker"]))
     falar("🪙 **AURUM** está escrevendo o relatório do dia...")
     escritorio.status("aurum", "trabalhando", "escrevendo o relatório do dia")
-    resultado["aurum"] = aurum.relatorio(resultado, pl, usar_ia=usar_ia)
+    resultado["aurum"] = _seguro("relatório do AURUM", lambda: aurum.relatorio(resultado, pl, usar_ia=usar_ia),
+                                 {"texto": "O AURUM não conseguiu escrever o relatório completo hoje; os números estão no painel.",
+                                  "fonte": "regras", "hora": ""})
     escritorio.registrar("aurum", f"apuração concluída: {len(rk)} empresas, {sum(a['nivel'] == 1 for a in resultado['alertas'])} "
                                   f"alertas importantes; {mesa.resumo_texto(reuniao)}")
     escritorio.status("aurum", "pausa", "relatório do dia entregue")
     texto = "🪙 AURUM\n\n" + resultado["aurum"]["texto"].replace("**", "") + "\n\n" + "─" * 20 + "\n\n" + texto
     texto = texto.replace("─" * 20, "🧭 Atlas, o explorador:\n" + resultado["atlas"]["relatorio"].replace("**", "") + "\n\n" + "─" * 20, 1)
-    (REL / f"relatorio_{hoje:%Y-%m-%d}.txt").write_text(texto, encoding="utf-8")
-    with open(ULTIMO, "wb") as f:
+    if FALHAS:
+        texto += "\n\n⚠️ Etapas com problema hoje (o resto foi feito normalmente): " + "; ".join(FALHAS[:6])
+    resultado["falhas"] = list(FALHAS)
+    if not usar_demo:  # o relatório do dia só guarda dados reais
+        (REL / f"relatorio_{hoje:%Y-%m-%d}.txt").write_text(texto, encoding="utf-8")
+    tmp = ULTIMO.with_name(f"{ULTIMO.stem}.{os.getpid()}.tmp")  # gravação atômica: o painel nunca lê o arquivo pela metade
+    with open(tmp, "wb") as f:
         pickle.dump(resultado, f)
+    os.replace(tmp, ULTIMO)
 
     print("\n" + texto + "\n")
     if enviar:

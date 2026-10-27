@@ -223,6 +223,14 @@ const TELAS = {
     ctx.globalAlpha = 1; ctx.fillStyle = '#234A6B'; ctx.beginPath(); ctx.arc(170, 72, 30, 0, 7); ctx.fill(); ctx.strokeStyle = '#4DA3FF'; ctx.stroke();
     ctx.fillStyle = '#E8E6E1'; ctx.font = '700 22px monospace'; ctx.textAlign = 'center'; ctx.fillText(`${Math.round(52 + Math.sin(t) * 3)}%`, 170, 80);
   },
+  macro(ctx, t) {
+    ctx.fillStyle = '#10263A'; ctx.fillRect(8, 8, 240, 128);
+    [[60, 50, 16, '#2E7D5B'], [96, 92, 20, '#00C176'], [190, 56, 22, '#B5452B']].forEach(([x, y, r, c]) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); });
+    ctx.strokeStyle = '#F5A623'; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.lineDashOffset = -t * 30;
+    ctx.beginPath(); ctx.moveTo(76, 46); ctx.quadraticCurveTo(130, 0, 170, 50); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(114, 90); ctx.quadraticCurveTo(160, 120, 186, 76); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+    ctx.fillStyle = '#E8E6E1'; ctx.font = '700 14px monospace'; ctx.textAlign = 'center'; ctx.fillText('US$ · SELIC · BRENT', 128, 132);
+  },
   trading(ctx, t) {
     ctx.setLineDash([8, 6]); ctx.lineWidth = 2;
     ctx.strokeStyle = '#00C176'; ctx.beginPath(); ctx.moveTo(8, 22); ctx.lineTo(248, 22); ctx.stroke();

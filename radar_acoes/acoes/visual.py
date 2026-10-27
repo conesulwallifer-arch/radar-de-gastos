@@ -251,6 +251,7 @@ APARENCIA = {
     "entrada":     {"pele": "#8D5524", "cabelo": "#2B1B10", "estilo": "curto", "roupa": "#7A4B1E", "acessorio": "bone"},
     "conjunto":    {"pele": "#FFDBAC", "cabelo": "#1A1A1A", "estilo": "longo", "roupa": "#234A6B", "acessorio": "oculos"},
     "trading":     {"pele": "#F1C27D", "cabelo": "#111111", "estilo": "curto", "roupa": "#5A1E1E", "acessorio": "gravata"},
+    "macro":       {"pele": "#C68642", "cabelo": "#3B2416", "estilo": "longo", "roupa": "#1F4E5F", "acessorio": "oculos"},
 }
 
 
@@ -316,6 +317,13 @@ def _tela(aid: str) -> str:
         return (linhas + '<circle cx="66" cy="28" r="12" fill="#234A6B" stroke="#4DA3FF"/>'
                 '<g class="sa-marcador"><text x="66" y="31" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8" fill="#E8E6E1">p</text></g>'
                 '<text x="84" y="31" font-family="IBM Plex Mono,monospace" font-size="7" fill="#00C176">52%</text>')
+    if aid == "macro":  # mapa-múndi com setas de fluxo (Brasil ↔ EUA ↔ China)
+        return ('<rect x="4" y="6" width="88" height="44" rx="3" fill="#10263A" stroke="#4DA3FF" stroke-opacity=".5"/>'
+                '<circle cx="24" cy="20" r="6" fill="#2E7D5B"/><circle cx="40" cy="36" r="7" fill="#00C176"/>'
+                '<circle cx="74" cy="22" r="8" fill="#B5452B"/>'
+                '<path class="sa-meridiano" d="M30,20 Q50,4 66,20" fill="none" stroke="#F5A623" stroke-width="1.5" stroke-dasharray="3 2"/>'
+                '<path d="M46,36 Q60,44 70,30" fill="none" stroke="#F5A623" stroke-width="1.5" stroke-dasharray="3 2"/>'
+                '<text x="48" y="48" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="6" fill="#E8E6E1">US$ · Selic · Brent</text>')
     if aid == "trading":  # candles com stop e alvo
         velas = "".join(f'<line x1="{12 + k * 12}" y1="{y - 6}" x2="{12 + k * 12}" y2="{y + h + 6}" stroke="{c}"/>'
                         f'<rect class="sa-barra" style="animation-delay:{k * .15}s" x="{8 + k * 12}" y="{y}" width="8" height="{h}" fill="{c}"/>'
@@ -425,7 +433,7 @@ def boneco(aid: str, estado: str) -> str:
 
 EQUIPE_NOME = {"aurum": "AURUM", "renda": "Dora", "fundamentos": "Fausto", "valuation": "Vitória", "tendencia": "Téo",
                "noticias": "Nina", "previsor": "Íris", "risco": "Rex", "atlas": "Atlas",
-               "proventos": "Otto", "entrada": "Bento", "conjunto": "Sofia", "trading": "Leo"}
+               "proventos": "Otto", "entrada": "Bento", "conjunto": "Sofia", "trading": "Leo", "macro": "Helena"}
 
 CSS_SALA = """
 <style>
