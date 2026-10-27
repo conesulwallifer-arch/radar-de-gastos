@@ -14,7 +14,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from . import DADOS
+from . import DADOS, hoje_brt, salvar_csv
 
 ARQ = DADOS / "memoria_votos.csv"
 JANELA = 63           # pregões até conferir o voto
@@ -22,7 +22,7 @@ AMOSTRA_MINIMA = 150  # votos conferidos antes de mexer no peso
 
 
 def registrar(opinioes: dict, precos_hoje: dict[str, float], hoje: date | None = None) -> None:
-    hoje = (hoje or date.today()).isoformat()
+    hoje = (hoje or hoje_brt()).isoformat()
     linhas = [{"data": hoje, "agente": a, "ticker": t, "voto": o["voto"], "preco": precos_hoje.get(t)}
               for t, ops in opinioes.items() for a, o in ops.items()]
     novo = pd.DataFrame(linhas)
@@ -32,7 +32,7 @@ def registrar(opinioes: dict, precos_hoje: dict[str, float], hoje: date | None =
     except (FileNotFoundError, pd.errors.EmptyDataError):
         pass
     ARQ.parent.mkdir(parents=True, exist_ok=True)
-    novo.to_csv(ARQ, index=False)
+    salvar_csv(novo, ARQ)
 
 
 def _retornos(reg: pd.DataFrame, precos: dict, proventos: dict) -> pd.DataFrame:

@@ -17,7 +17,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from . import DADOS
+from . import DADOS, salvar_csv
 
 HORIZONTE = 21          # pregões (~1 mês)
 K_VIZINHOS = 60
@@ -142,7 +142,7 @@ def registrar(prev: pd.DataFrame, precos_hoje: dict[str, float], hoje: date | No
     except (FileNotFoundError, pd.errors.EmptyDataError):
         pass
     REGISTRO.parent.mkdir(parents=True, exist_ok=True)
-    novo.to_csv(REGISTRO, index=False)
+    salvar_csv(novo, REGISTRO)
 
 
 def placar_real(precos: dict[str, pd.Series]) -> dict:

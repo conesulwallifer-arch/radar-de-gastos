@@ -21,7 +21,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from . import DADOS
+from . import DADOS, hoje_brt, salvar_csv
 
 STOP_SIGMA = 1.2         # stop = entrada − 1,2 × oscilação típica de 1 mês (desvio diário × √20)
 RISCO_MIN, RISCO_MAX = 0.05, 0.18  # distância do stop: entre 5% e 18%
@@ -261,7 +261,7 @@ def registrar(sinais: pd.DataFrame, hoje: date) -> None:
     except (FileNotFoundError, pd.errors.EmptyDataError):
         pass
     REGISTRO.parent.mkdir(parents=True, exist_ok=True)
-    novo.to_csv(REGISTRO, index=False)
+    salvar_csv(novo, REGISTRO)
 
 
 def placar_real(precos: dict[str, pd.Series]) -> dict:
@@ -307,7 +307,7 @@ COLS_OP = ["ticker", "data_compra", "preco_compra", "quantidade", "stop", "alvo"
 
 def ler_operacoes() -> pd.DataFrame:
     try:
-        df = pd.read_csv(OPERACOES, dtype={"ticker": str, "status": str, "obs": str})
+        df = pd.read_csv(OPERACOES, dtype={c: str for c in ("ticker", "status", "obs", "data_compra", "data_venda")})
     except (FileNotFoundError, pd.errors.EmptyDataError):
         df = pd.DataFrame(columns=COLS_OP)
     for c in COLS_OP:
@@ -315,6 +315,10 @@ def ler_operacoes() -> pd.DataFrame:
             df[c] = np.nan
     df["ticker"] = df["ticker"].fillna("").astype(str).str.upper().str.strip()
     df["status"] = df["status"].fillna("aberta")
+    for c in ("data_compra", "data_venda", "obs"):  # texto sempre texto: coluna vazia não vira número (quebrava o editor do painel)
+        df[c] = df[c].astype("object").where(df[c].notna(), None)
+    for c in ("preco_compra", "quantidade", "stop", "alvo", "preco_venda"):
+        df[c] = pd.to_numeric(df[c], errors="coerce").astype(float)
     return df[COLS_OP]
 
 
@@ -326,12 +330,12 @@ def salvar_operacoes(df: pd.DataFrame) -> None:
     df = df[df["ticker"].fillna("").astype(str).str.strip() != ""]
     df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
     OPERACOES.parent.mkdir(parents=True, exist_ok=True)
-    df[COLS_OP].to_csv(OPERACOES, index=False)
+    salvar_csv(df[COLS_OP], OPERACOES)
 
 
 def acompanhar(ops: pd.DataFrame, precos_agora: dict[str, float], hoje: date | None = None) -> pd.DataFrame:
     """Para cada operação aberta: resultado agora e o que fazer (vender no alvo, sair no stop, proteger o ganho...)."""
-    hoje = pd.Timestamp(hoje or date.today())
+    hoje = pd.Timestamp(hoje or hoje_brt())
     linhas = []
     for _, o in ops[ops["status"].fillna("aberta").str.lower() == "aberta"].iterrows():
         t, pc = o["ticker"], float(o["preco_compra"]) if o["preco_compra"] == o["preco_compra"] else np.nan
@@ -366,7 +370,7 @@ def alertas_operacoes(precos_agora: dict[str, float]) -> list[str]:
         est = json.loads(ESTADO_ALERTAS.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         est = {}
-    hoje = date.today().isoformat()
+    hoje = hoje_brt().isoformat()
     if est.get("data") != hoje:
         est = {"data": hoje, "enviados": []}
     novos = []

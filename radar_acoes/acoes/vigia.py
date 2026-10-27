@@ -14,7 +14,7 @@ from typing import Callable
 
 import pandas as pd
 
-from . import DADOS
+from . import DADOS, hoje_brt
 from .alertas import _fmt_r as brl
 
 ESTADO = DADOS / "vigia_estado.json"
@@ -47,9 +47,19 @@ def _ler_estado() -> dict:
         e = json.loads(ESTADO.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         e = {}
-    if e.get("dia") != date.today().isoformat():
-        e = {"dia": date.today().isoformat(), "enviados": []}
+    if e.get("dia") != hoje_brt().isoformat():
+        e = {"dia": hoje_brt().isoformat(), "enviados": []}
     return e
+
+
+def _fechamento_anterior(R: dict, t: str, padrao: float) -> float:
+    """Fechamento do pregão ANTERIOR: a queda do dia é medida contra ele (não contra a última apuração da hora)."""
+    s = (R.get("precos") or {}).get(t)
+    if s is None or len(s) < 2:
+        return padrao
+    hoje = pd.Timestamp(hoje_brt())
+    anteriores = s[s.index.normalize() < hoje]
+    return float(anteriores.iloc[-1]) if len(anteriores) else padrao
 
 
 def checar(R: dict, carteira: list[str], buscar: Callable[[list[str]], dict[str, float]] = precos_agora,
@@ -63,7 +73,7 @@ def checar(R: dict, carteira: list[str], buscar: Callable[[list[str]], dict[str,
     info = rk.set_index("ticker")
     for t, p in agora.items():
         r = info.loc[t]
-        ref, teto = float(r["preco"]), r["preco_teto_bazin"]
+        ref, teto = _fechamento_anterior(R, t, float(r["preco"])), r["preco_teto_bazin"]
         var = p / ref - 1 if ref else 0.0
         boa = r["nota"] >= 60 and r.get("confianca", "Alta") != "Baixa"
         if boa and teto == teto and ref > teto >= p:

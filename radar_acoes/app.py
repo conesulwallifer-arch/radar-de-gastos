@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import pickle
 import threading
+import time
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -25,9 +26,9 @@ for _fluxo in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-from acoes import AVISO, agenda, aovivo, trading, aporte, atlas, aurum, escritorio, memoria, mesa, meta, plano, universo, visual  # noqa: E402
+from acoes import AVISO, gravar_atomico, salvar_csv, agenda, aovivo, trading, aporte, atlas, aurum, escritorio, memoria, mesa, meta, plano, universo, visual  # noqa: E402
 import segundo_plano  # noqa: E402
-from apurar import ULTIMO, apurar  # noqa: E402
+from apurar import ULTIMO, ApuracaoEmAndamento, apurar  # noqa: E402
 
 st.set_page_config(page_title="AURUM · Inteligência de Investimentos", page_icon="🪙", layout="wide")
 visual.aplicar()
@@ -66,8 +67,20 @@ def carregar(marca: float) -> dict | None:
     (Sem sublinhado no nome: parâmetro com '_' é ignorado pelo cache do Streamlit e o painel ficava com dados velhos.)"""
     if not ULTIMO.exists():
         return None
-    with open(ULTIMO, "rb") as f:
-        return pickle.load(f)
+    for _ in range(3):  # pode estar sendo gravado agora pela Equipe 24h: tenta de novo em instantes
+        try:
+            with open(ULTIMO, "rb") as f:
+                return pickle.load(f)
+        except (EOFError, pickle.UnpicklingError, OSError, AttributeError, ImportError):
+            time.sleep(1.0)
+    return {"_ilegivel": True}
+
+
+def _apuracao_nova_saiu() -> None:
+    """Se a Equipe 24h gravou uma apuração nova enquanto o painel está aberto, recarrega a página inteira sozinho."""
+    atual = ULTIMO.stat().st_mtime if ULTIMO.exists() else 0
+    if atual and atual != st.session_state.get("_mtime_ultimo"):
+        st.rerun(scope="app")
 
 
 @st.cache_resource
@@ -83,8 +96,17 @@ def rodar(demo: bool):
         return
     try:
         with st.status("🪙 AURUM convocou a equipe. Acompanhe o trabalho ao vivo...", expanded=True) as caixa:
-            apurar(universo.tickers(), plano.ler()["aporte_mensal"], usar_demo=demo, enviar=False,
-                   progresso=lambda m: caixa.write(md(m)))
+            try:
+                apurar(universo.tickers(), plano.ler()["aporte_mensal"], usar_demo=demo, enviar=False,
+                       progresso=lambda m: caixa.write(md(m)))
+            except ApuracaoEmAndamento as e:
+                caixa.update(label="⏳ A equipe já está apurando agora", state="error")
+                st.warning(f"{e} O painel atualiza sozinho quando ela terminar.")
+                return
+            except RuntimeError as e:
+                caixa.update(label="⚠️ A apuração não conseguiu terminar", state="error")
+                st.error(str(e))
+                return
             caixa.update(label="✅ Apuração concluída — equipe dispensada.", state="complete")
     finally:
         trava.release()
@@ -119,7 +141,15 @@ with st.sidebar:
 if "rodar_demo" in st.session_state:  # roda na área principal, para ver a equipe trabalhando com espaço
     rodar(st.session_state.pop("rodar_demo"))
 
-R = carregar(ULTIMO.stat().st_mtime if ULTIMO.exists() else 0)
+_MTIME = ULTIMO.stat().st_mtime if ULTIMO.exists() else 0
+st.session_state["_mtime_ultimo"] = _MTIME
+R = carregar(_MTIME)
+if R is not None and R.get("_ilegivel"):
+    st.cache_data.clear()
+    visual.topo("Inteligência de investimentos para renda e patrimônio", [("APURAÇÃO SENDO GRAVADA", "alerta")])
+    st.info("A equipe está terminando de gravar uma apuração agora. Atualize a página (F5) em alguns segundos. "
+            "Se continuar assim, clique em **🔄 Apurar agora** na barra lateral.")
+    st.stop()
 if R is None:
     visual.topo("Inteligência de investimentos para renda e patrimônio", [("AGUARDANDO PRIMEIRA APURAÇÃO", "alerta")])
     st.info("Ainda não há apuração. Clique em **🔄 Apurar agora** na barra lateral (precisa de internet).")
@@ -134,8 +164,9 @@ cart = aporte.ler_carteira()
 datas = pd.to_datetime(rk["data_cotacao"].dropna()) if "data_cotacao" in rk else pd.Series(dtype="datetime64[ns]")
 ult_cot = datas.max() if len(datas) else None
 atraso = len(pd.bdate_range(ult_cot, pd.Timestamp.today().normalize())) - 1 if ult_cot is not None else 99
-fresco = (f"📅 Apuração de **{R['data']:%d/%m/%Y}** · cotações até **{ult_cot:%d/%m/%Y}** (Yahoo Finance) · "
-          if ult_cot is not None else f"📅 Apuração de **{R['data']:%d/%m/%Y}** · ")
+_quando = f"{pd.Timestamp(R['hora']):%d/%m/%Y às %H:%M}" if R.get("hora") else f"{R['data']:%d/%m/%Y}"
+fresco = (f"📅 Apuração de **{_quando}** · cotações até **{ult_cot:%d/%m/%Y}** (Yahoo Finance) · "
+          if ult_cot is not None else f"📅 Apuração de **{_quando}** · ")
 fresco += (f"Selic **{pct(mac['selic'], 2)}**, IPCA 12m **{pct(mac['ipca_12m'], 2)}** "
            + ("(⚠️ estimados: Banco Central fora do ar)" if mac.get("estimado") else "(Banco Central)"))
 agora_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
@@ -160,8 +191,13 @@ fita_itens += [(r_["ticker"], float(r_["preco"]), float(r_["var_dia"])) for _, r
 visual.fita(fita_itens)
 if atraso > 3:
     st.warning(fresco + " — **dados com mais de 3 dias úteis: clique em Apurar agora.**")
+elif atraso >= 1 and not segundo_plano.ligada()[0] and not R.get("demo"):
+    st.warning(fresco + " — **a Equipe 24h está parada e estes dados são de um pregão anterior.** Clique em Apurar agora "
+               "ou ligue a equipe na barra lateral.")
 else:
     st.caption(fresco)
+if R.get("falhas"):
+    st.caption("⚠️ Etapas com problema na última apuração (o resto saiu normal): " + "; ".join(R["falhas"][:4]))
 if R.get("demo"):
     st.error("⚠️ **MODO DEMONSTRAÇÃO — NÚMEROS FICTÍCIOS.** Nada aqui vale para investir. "
              "Clique em **🔄 Apurar agora (dados reais)** na barra lateral.")
@@ -194,9 +230,12 @@ with abas[0]:
     b1, b2 = st.columns([1, 3])
     if b1.button("🔁 Gerar novo relatório"):
         with st.spinner("AURUM analisando o mercado..."):
-            R["aurum"] = aurum.relatorio(R, pl)
-            with open(ULTIMO, "wb") as f:
-                pickle.dump(R, f)
+            novo = aurum.relatorio(R, pl)
+            atual = carregar.__wrapped__(0) if hasattr(carregar, "__wrapped__") else None  # relê: a equipe pode ter gravado algo mais novo
+            if not atual or atual.get("_ilegivel") or atual.get("data") != R.get("data"):
+                atual = R
+            atual["aurum"] = novo
+            gravar_atomico(ULTIMO, lambda f: pickle.dump(atual, f))
         st.cache_data.clear()
         st.rerun()
     if not aurum.ia_disponivel():
@@ -235,12 +274,13 @@ with abas[1]:
     c_ao, c_fil, c_busca = st.columns([1, 2, 2])
     ligado = c_ao.toggle("🔴 Ao vivo", value=True, key="ao_vivo_ligado", help="Desligue para congelar a tela.")
     filtro = c_fil.segmented_control("Mostrar", ["Todas", "Recomendadas", "Minha carteira"], default="Todas",
-                                     key="ao_vivo_filtro", label_visibility="collapsed")
+                                     key="ao_vivo_filtro", label_visibility="collapsed") or "Todas"
     busca = c_busca.text_input("Buscar", placeholder="🔎 buscar ação (ex.: PETR4)", key="ao_vivo_busca",
                                label_visibility="collapsed").strip().upper()
 
     @st.fragment(run_every=60 if ligado else None)
     def _mercado_ao_vivo():
+        _apuracao_nova_saiu()
         lista = tuple(sorted(set(rk["ticker"]) | set(cart["ticker"])))
         try:
             ao = _cotacoes_ao_vivo(lista)
@@ -675,6 +715,7 @@ with abas[5]:
     @st.fragment(run_every=20)
     def _sala_ao_vivo():
         """Atualiza sozinho a cada 20 s: dá para ver a equipe trabalhando enquanto o agente roda."""
+        _apuracao_nova_saiu()
         ok_, txt_ = segundo_plano.ligada()
         stt = escritorio.ler_status()
         c_tit, c_vis = st.columns([4, 1])
@@ -1241,7 +1282,7 @@ with abas[11]:
     if st.button("💾 Salvar carteira"):
         ed = ed.dropna(subset=["ticker"])
         ed["ticker"] = ed["ticker"].str.upper().str.strip()
-        ed.to_csv(aporte.ARQ_CARTEIRA, index=False)
+        salvar_csv(ed, aporte.ARQ_CARTEIRA)
         st.success("Carteira salva.")
         st.rerun()
     rev = aporte.revisar_carteira(rk, cart)

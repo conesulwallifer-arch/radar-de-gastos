@@ -63,10 +63,4 @@ jobs:
           else
             python agente.py --agora
           fi
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: relatorio-aurum
-          path: radar_acoes/dados_acoes/relatorios/
-          if-no-files-found: ignore
-          retention-days: 30
+      # sem artefato e sem relatório no log: num repositório público, qualquer um veria sua carteira e patrimônio

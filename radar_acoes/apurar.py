@@ -19,7 +19,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, escritorio, dados, demo, aurum, geopolitica, macro, memoria, mesa, meta, noticias, oraculos, plano, previsao, previsor, trading, universo  # noqa: E402
+from acoes import AVISO, DADOS, destravar, gravar_atomico, hoje_brt, travar, alertas, analise, aporte, atlas, backtest, escritorio, dados, demo, aurum, geopolitica, macro, memoria, mesa, meta, noticias, oraculos, plano, previsao, previsor, trading, universo  # noqa: E402
 
 HIST = DADOS / "historico"
 REL = DADOS / "relatorios"
@@ -69,14 +69,32 @@ def anterior(hoje: date) -> pd.DataFrame | None:
     return pd.read_csv(arqs[-1]) if arqs else None
 
 
-def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = False, com_noticias: bool = True,
-           enviar: bool = True, forcar: bool = False, usar_ia: bool = True, progresso=None) -> dict:
+TRAVA_APURACAO = DADOS / "apuracao.lock"
+
+
+class ApuracaoEmAndamento(RuntimeError):
+    pass
+
+
+def apurar(*args, **kw) -> dict:
+    """Uma apuração por vez no computador inteiro (painel, Equipe 24h e .bat agendado não se atropelam)."""
+    trava = travar(TRAVA_APURACAO)
+    if trava is None:
+        raise ApuracaoEmAndamento("Já tem uma apuração em andamento (Equipe 24h ou outra janela). Aguarde terminar e tente de novo.")
+    try:
+        return _apurar(*args, **kw)
+    finally:
+        destravar(trava)
+
+
+def _apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = False, com_noticias: bool = True,
+            enviar: bool = True, forcar: bool = False, usar_ia: bool = True, progresso=None) -> dict:
     falar = progresso or (lambda m: None)
     FALHAS.clear()
     enviar = enviar and not usar_demo  # dados fictícios nunca saem no Telegram/e-mail
     escritorio.SILENCIOSO = usar_demo
     escritorio.status("aurum", "trabalhando", "coordenando a apuração do dia")
-    hoje = date.today()
+    hoje = hoje_brt()
     HIST.mkdir(parents=True, exist_ok=True)
     REL.mkdir(parents=True, exist_ok=True)
     cart = aporte.ler_carteira()
@@ -91,13 +109,13 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     if not usar_demo:
         atlas.limpar_descobertas(sem_dados)  # propostas do Atlas sem dados por vários dias seguidos saem da lista
     if not base:
-        raise SystemExit("Nenhum dado coletado. Verifique a internet (ou rode com --demo).")
+        raise RuntimeError("Nenhum dado coletado. Verifique a internet (ou rode com --demo).")
 
     print("2/5 Calculando indicadores e notas...")
     selic_hoje = _seguro("Selic", lambda: macro.indicadores()["selic"], 0.15)  # usado no preço justo por dividendos descontados
     rk = analise.ranking(base, selic=selic_hoje)
     if rk.empty:
-        raise SystemExit("Nenhuma ação com dados suficientes para analisar. Verifique a internet e tente de novo.")
+        raise RuntimeError("Nenhuma ação com dados suficientes para analisar. Verifique a internet e tente de novo.")
 
     print("3/5 Buscando notícias...")
     falar("📰 Buscando as notícias das 30 primeiras e da sua carteira...")
@@ -328,14 +346,13 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
     if FALHAS:
         texto += "\n\n⚠️ Etapas com problema hoje (o resto foi feito normalmente): " + "; ".join(FALHAS[:6])
     resultado["falhas"] = list(FALHAS)
+    resultado["hora"] = pd.Timestamp.now(tz="America/Sao_Paulo").strftime("%Y-%m-%d %H:%M")
     if not usar_demo:  # o relatório do dia só guarda dados reais
         (REL / f"relatorio_{hoje:%Y-%m-%d}.txt").write_text(texto, encoding="utf-8")
-    tmp = ULTIMO.with_name(f"{ULTIMO.stem}.{os.getpid()}.tmp")  # gravação atômica: o painel nunca lê o arquivo pela metade
-    with open(tmp, "wb") as f:
-        pickle.dump(resultado, f)
-    os.replace(tmp, ULTIMO)
+    gravar_atomico(ULTIMO, lambda f: pickle.dump(resultado, f))  # o painel nunca lê o arquivo pela metade
 
-    print("\n" + texto + "\n")
+    if not os.getenv("CI"):  # no GitHub Actions o log pode ser público: o relatório (com carteira e patrimônio) não vai para lá
+        print("\n" + texto + "\n")
     if enviar:
         alertas.carregar_config()
         assunto = f"Radar de Ações {hoje:%d/%m}: {sum(a['nivel'] == 1 for a in alts)} alertas importantes"

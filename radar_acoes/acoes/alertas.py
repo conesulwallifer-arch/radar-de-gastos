@@ -14,14 +14,9 @@ from . import RAIZ
 
 
 def carregar_config() -> None:
-    """Lê radar_acoes/config.env (CHAVE=valor por linha) para as variáveis de ambiente, sem sobrescrever."""
-    arq = RAIZ / "config.env"
-    if not arq.exists():
-        return
-    for linha in arq.read_text(encoding="utf-8-sig").splitlines():  # -sig: aceita arquivo salvo com BOM (Bloco de Notas/Excel)
-        if "=" in linha and not linha.lstrip().startswith("#"):
-            k, v = linha.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    """Lê radar_acoes/config.env (veja acoes.carregar_config)."""
+    from . import carregar_config as _c
+    _c()
 
 
 def _texto(v) -> str | None:
@@ -141,13 +136,13 @@ def enviar_telegram(texto: str) -> bool:
                 r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
                                   data={"chat_id": chat, "text": parte, "disable_web_page_preview": "true"}, timeout=20)
             except requests.RequestException as e:
-                print(f"  [telegram] falhou (tentativa {tentativa + 1}): {e}")
+                print(f"  [telegram] falhou (tentativa {tentativa + 1}): {type(e).__name__}: {str(e).replace(token, '***')[:160]}")
                 time.sleep(2 * (tentativa + 1))
                 continue
             if r.ok:
                 enviado = True
                 break
-            print(f"  [telegram] erro {r.status_code}: {r.text[:200]}")
+            print(f"  [telegram] erro {r.status_code}: {r.text[:200].replace(token, '***')}")
             if r.status_code == 429:  # muitas mensagens: o Telegram diz quanto esperar
                 try:
                     time.sleep(int(r.json().get("parameters", {}).get("retry_after", 3)) + 1)

@@ -624,3 +624,55 @@ def test_auditoria_coleta_usa_ultimo_cache_bom(tmp_path, monkeypatch):
     assert d["info"]["trailingEps"] == 1.0 and d["info_antiga"] and float(d["precos"].iloc[-1]) == 11.0
     (tmp_path / "LIXO3_20260101.pkl").write_bytes(b"corrompido")
     assert dados._ler(tmp_path / "LIXO3_20260101.pkl") is None and not (tmp_path / "LIXO3_20260101.pkl").exists()
+
+
+# ---------------------------------------------------------------- regressões da auditoria (equipe 24h e painel)
+def test_auditoria_equipe_sobrevive_a_erro_fatal(monkeypatch, tmp_path):
+    """SystemExit (ex.: Yahoo sem dados depois do PC acordar) matava a equipe para sempre; agora ela tenta de novo."""
+    from datetime import datetime, timedelta
+    import agente
+    for nome in ("VIVO", "TRAVA", "PID", "FECHAMENTO", "SEMANAL_FEITA", "FALHAS_DIA"):
+        monkeypatch.setattr(agente, nome, tmp_path / nome)
+    relogio = [datetime(2026, 10, 27, 19, 0, tzinfo=agente.FUSO)]
+    monkeypatch.setattr(agente, "agora", lambda: relogio[0])
+    monkeypatch.setattr(agente, "_batimento", lambda: None)
+    chamadas = []
+
+    def apurar_que_explode(*a, **k):
+        chamadas.append(1)
+        raise SystemExit("Nenhum dado coletado")
+
+    monkeypatch.setattr(agente, "apurar", apurar_que_explode)
+    monkeypatch.setattr(agente, "enviar", lambda *a, **k: None)
+
+    class Fim(Exception):
+        pass
+
+    def dormir(seg):
+        relogio[0] += timedelta(seconds=seg)
+        if len(chamadas) >= 3:
+            raise Fim
+
+    monkeypatch.setattr(agente.time, "sleep", dormir)
+    monkeypatch.setattr(agente, "trava_unica", lambda: object())
+    with pytest.raises(Fim):
+        agente.vigiar()
+    assert len(chamadas) >= 3  # continuou tentando em vez de morrer na primeira
+
+
+def test_auditoria_trava_entre_processos(tmp_path):
+    from acoes import destravar, travar
+    a = travar(tmp_path / "x.lock")
+    assert a is not None and travar(tmp_path / "x.lock") is None  # segunda tentativa não entra
+    destravar(a)
+    b = travar(tmp_path / "x.lock")
+    assert b is not None
+    destravar(b)
+
+
+def test_auditoria_operacoes_salvas_tem_texto_como_texto(tmp_path, monkeypatch):
+    monkeypatch.setattr(trading, "OPERACOES", tmp_path / "o.csv")
+    trading.salvar_operacoes(pd.DataFrame([{"ticker": "ITSA4", "data_compra": "2026-10-20", "preco_compra": 10.0,
+                                            "quantidade": 100, "stop": 9, "alvo": 12, "status": "aberta"}]))
+    df = trading.ler_operacoes()
+    assert df["data_venda"].dtype == object and df["obs"].dtype == object and df["stop"].dtype == float

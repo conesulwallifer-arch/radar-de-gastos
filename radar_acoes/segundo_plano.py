@@ -47,7 +47,7 @@ def ligar() -> str:
     vbs.parent.mkdir(parents=True, exist_ok=True)
     cmd = f'""{pythonw()}"" ""{AGENTE}""'
     vbs.write_text(f'Set s = CreateObject("WScript.Shell")\r\ns.CurrentDirectory = "{RAIZ}"\r\n'
-                   f's.Environment("PROCESS")("AURUM_OCULTO") = "1"\r\ns.Run "{cmd}", 0, False\r\n', encoding="utf-8")
+                   f's.Environment("PROCESS")("AURUM_OCULTO") = "1"\r\ns.Run "{cmd}", 0, False\r\n', encoding="utf-16")  # UTF-16: o Windows lê certo caminhos com acento (ex.: C:\\Users\\João)
     if not ligada()[0]:
         env = {**os.environ, "AURUM_OCULTO": "1"}
         subprocess.Popen([pythonw(), str(AGENTE)], cwd=RAIZ, env=env,
@@ -66,8 +66,14 @@ def desligar() -> str:
             msgs.append("✅ Não liga mais sozinha com o Windows.")
         try:
             pid = int((DADOS / "agente.pid").read_text().strip())
-            r = subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, text=True)
-            msgs.append("✅ Equipe parada agora." if r.returncode == 0 else "A equipe já estava parada.")
+            parou = False
+            for img in ("pythonw.exe", "python.exe"):  # só encerra se o processo for mesmo o Python (o número pode ter sido reusado)
+                r = subprocess.run(["taskkill", "/F", "/FI", f"PID eq {pid}", "/FI", f"IMAGENAME eq {img}"], capture_output=True, text=True)
+                saida = (r.stdout or "").upper()
+                parou |= r.returncode == 0 and ("SUCCESS" in saida or "ÊXITO" in saida or "XITO" in saida)
+            (DADOS / "agente.pid").unlink(missing_ok=True)
+            (DADOS / "agente_vivo.txt").unlink(missing_ok=True)
+            msgs.append("✅ Equipe parada agora." if parou else "A equipe já estava parada.")
         except (FileNotFoundError, ValueError):
             msgs.append("A equipe já estava parada.")
     else:

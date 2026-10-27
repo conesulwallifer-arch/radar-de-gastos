@@ -35,12 +35,16 @@ if errorlevel 8 (
 )
 echo  Conferindo os componentes...
 python -m pip install -q -r requirements.txt
+if errorlevel 1 echo  [aviso] Nao consegui atualizar algum componente; o AURUM deve funcionar mesmo assim. Se der erro, me mande um print.
+copy /y "%PASTA%\radar-de-gastos-claude-tender-ritchie-x701ww\radar_acoes\Atualizar AURUM.bat" "%~dp0Atualizar AURUM.novo.bat" >nul 2>&1
 
 if "%EQUIPE%"=="1" (
   echo  Religando a Equipe 24h...
   python segundo_plano.py ligar >nul 2>&1
 )
 rmdir /s /q "%PASTA%" >nul 2>&1
+REM o proprio atualizador e trocado por ultimo, depois que esta janela fechar (um .bat nao pode se sobrescrever enquanto roda)
+if exist "%~dp0Atualizar AURUM.novo.bat" start "" /min cmd /c "timeout /t 12 >nul & move /y "%~dp0Atualizar AURUM.novo.bat" "%~dp0Atualizar AURUM.bat" >nul"
 echo.
 echo  ===============================================
 echo   AURUM atualizado! Abrindo o painel...

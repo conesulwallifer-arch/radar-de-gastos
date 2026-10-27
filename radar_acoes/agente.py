@@ -16,6 +16,7 @@ Tudo o que fazem fica no diário da equipe (aba 🧠 Sala dos Agentes) e o impor
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pickle
 import sys
@@ -25,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import DADOS, alertas, aporte, escritorio, plano, semanal, trading, universo, vigia  # noqa: E402
+from acoes import DADOS, hoje_brt, alertas, aporte, escritorio, plano, semanal, trading, universo, vigia  # noqa: E402
 from apurar import ULTIMO, apurar  # noqa: E402
 
 alertas.carregar_config()  # config.env antes de ler os intervalos abaixo
@@ -69,8 +70,18 @@ def data_ultima_apuracao() -> date | None:
 
 
 def sinal_de_vida() -> None:
-    VIVO.parent.mkdir(parents=True, exist_ok=True)
-    VIVO.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+    try:
+        VIVO.parent.mkdir(parents=True, exist_ok=True)
+        VIVO.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+    except OSError:  # antivírus/disco: tenta de novo no próximo minuto
+        pass
+
+
+def _batimento() -> None:
+    """Sinal de vida a cada minuto, mesmo durante uma apuração longa (o painel não mostra 'parada' à toa)."""
+    while True:
+        sinal_de_vida()
+        time.sleep(60)
 
 
 def enviar(texto: str, assunto: str) -> None:
@@ -98,11 +109,46 @@ def _precos_do(R: dict) -> dict[str, float]:
     return {t: float(p) for t, p in zip(rk["ticker"], rk["preco"]) if p == p}
 
 
+FALHAS_DIA = DADOS / "fechamento_falhas.json"
+
+
+def _falhas_hoje() -> int:
+    try:
+        d = json.loads(FALHAS_DIA.read_text(encoding="utf-8"))
+        return int(d.get("n", 0)) if d.get("data") == hoje_brt().isoformat() else 0
+    except (OSError, ValueError):
+        return 0
+
+
+def _marcar_falha(erro: BaseException) -> int:
+    n = _falhas_hoje() + 1
+    try:
+        FALHAS_DIA.write_text(json.dumps({"data": hoje_brt().isoformat(), "n": n}), encoding="utf-8")
+    except OSError:
+        pass
+    if n == 4:  # avisa uma vez, não a noite inteira
+        enviar(f"⚠️ AURUM: a apuração completa de hoje falhou 4 vezes ({type(erro).__name__}: {str(erro)[:200]}). "
+               "Vou tentar de novo amanhã. Se repetir, abra o painel e clique em Apurar agora para ver o erro.",
+               "AURUM: apuração falhou")
+    return n
+
+
 def apuracao_completa() -> None:
     print(f"[{agora():%d/%m %H:%M}] 🪙 Reunião completa da equipe começando...")
     escritorio.registrar("aurum", "convocou a equipe para a apuração completa")
     coberto = ultimo_pregao_fechado(agora())
-    R = apurar(universo.tickers(), plano.ler()["aporte_mensal"], forcar=True)  # já envia o relatório do AURUM
+    falhas = _falhas_hoje()
+    if falhas >= 4:
+        print("  Apuração completa falhou 4 vezes hoje: só amanhã (o aviso já foi enviado).")
+        FECHAMENTO.write_text(coberto.isoformat(), encoding="utf-8")  # não fica repetindo de 30 em 30 min
+        return
+    try:  # depois de 2 falhas, roda sem IA (se o erro estiver lá, não paga de novo)
+        R = apurar(universo.tickers(), plano.ler()["aporte_mensal"], forcar=True, usar_ia=falhas < 2)  # já envia o relatório
+    except KeyboardInterrupt:
+        raise
+    except BaseException as e:  # noqa: BLE001
+        _marcar_falha(e)
+        raise RuntimeError(str(e)) from None
     avisar_operacoes(_precos_do(R))
     FECHAMENTO.write_text(coberto.isoformat(), encoding="utf-8")
 
@@ -129,13 +175,22 @@ def apuracao_horaria() -> None:
     escritorio.status("aurum", "pausa", f"próxima apuração por volta das {agora() + timedelta(minutes=APURAR_A_CADA_MIN):%H:%M}")
 
 
+def _ler_ultimo() -> dict | None:
+    """Última apuração REAL (uma de teste com dados fictícios não serve de referência para alertas)."""
+    try:
+        with open(ULTIMO, "rb") as f:
+            R = pickle.load(f)
+    except Exception:  # noqa: BLE001 — arquivo ausente, sendo gravado ou corrompido
+        return None
+    return None if R.get("demo") else R
+
+
 def checagem() -> None:
-    if not ULTIMO.exists():
-        print("Ainda não há apuração; fazendo a primeira agora.")
-        apuracao_completa()
+    R = _ler_ultimo()
+    if R is None:
+        print("Sem apuração real disponível; fazendo uma agora.")
+        apuracao_horaria() if pregao_aberto(agora()) else apuracao_completa()
         return
-    with open(ULTIMO, "rb") as f:
-        R = pickle.load(f)
     escritorio.status(["risco", "tendencia"], "vigiando", "conferindo os preços do pregão")
     novos = vigia.checar(R, aporte.ler_carteira()["ticker"].tolist())
     ops = trading.ler_operacoes()
@@ -150,23 +205,24 @@ def checagem() -> None:
                          else "conferiu os preços do pregão: nada fora do normal")
     if novos:
         txt = "🪙 AURUM — alerta do pregão\n\n" + "\n\n".join(novos) + "\n\nNão é recomendação de investimento."
-        print(txt)
+        if not os.getenv("CI"):
+            print(txt)
         enviar(txt, f"AURUM: {len(novos)} alerta(s) agora")
     prox = agora() + timedelta(minutes=INTERVALO_MIN)
     escritorio.status(["risco", "tendencia"], "pausa", f"próxima conferência às {prox:%H:%M}")
 
 
 def reuniao_semanal() -> None:
-    if not ULTIMO.exists():
+    R = _ler_ultimo()
+    if R is None:
         return
-    with open(ULTIMO, "rb") as f:
-        R = pickle.load(f)
     escritorio.status("aurum", "trabalhando", "conduzindo a reunião semanal")
     txt = semanal.relatorio(R)
-    print(txt)
+    if not os.getenv("CI"):
+        print(txt)
     escritorio.registrar("aurum", "conduziu a reunião semanal e enviou o resumo")
     enviar(txt, "AURUM: reunião semanal")
-    SEMANAL_FEITA.write_text(date.today().isoformat(), encoding="utf-8")
+    SEMANAL_FEITA.write_text(hoje_brt().isoformat(), encoding="utf-8")
     escritorio.status("aurum", "pausa", "reunião semanal entregue")
 
 
@@ -214,11 +270,14 @@ def vigiar() -> None:
         print("O AURUM já está ligado em outra janela (ou em segundo plano). Nada a fazer aqui.")
         return
     PID.write_text(str(os.getpid()), encoding="utf-8")
+    import atexit
+    import threading
+    atexit.register(lambda: PID.unlink(missing_ok=True))
+    threading.Thread(target=_batimento, daemon=True).start()
     print("🪙 AURUM online. A equipe está trabalhando (Ctrl+C para parar).")
     escritorio.registrar("aurum", "ligou a equipe")
     while True:
         t = agora()
-        sinal_de_vida()
         try:
             ultima = data_ultima_apuracao()
             if ultima is None or ultima < ultimo_pregao_fechado(t):
@@ -233,10 +292,15 @@ def vigiar() -> None:
                 checagem()
             else:
                 escritorio.todos_em_pausa(descricao_proxima(t))
-        except Exception as e:  # noqa: BLE001  (a equipe não para por causa de um erro: tenta de novo no próximo ciclo)
-            print(f"  [erro] {e} — tento de novo no próximo ciclo.")
-            escritorio.registrar("aurum", f"encontrou um problema e vai tentar de novo: {e}")
-            escritorio.status("aurum", "erro", f"tentando de novo: {str(e)[:80]}")
+        except KeyboardInterrupt:
+            raise
+        except BaseException as e:  # noqa: BLE001  (inclui SystemExit: a equipe NUNCA para por causa de um erro)
+            print(f"  [erro] {type(e).__name__}: {e} — tento de novo no próximo ciclo.")
+            try:
+                escritorio.registrar("aurum", f"encontrou um problema e vai tentar de novo: {e}")
+                escritorio.status("aurum", "erro", f"tentando de novo: {str(e)[:80]}")
+            except Exception:  # noqa: BLE001
+                pass
         # dorme em blocos de 5 min mandando sinal de vida (o painel mostra 'equipe ligada')
         alvo = agora() + timedelta(minutes=INTERVALO_MIN)
         if APURAR_A_CADA_MIN and pregao_aberto(agora()):
@@ -245,7 +309,6 @@ def vigiar() -> None:
             alvo = alvo.replace(hour=HORA_APURACAO[0], minute=HORA_APURACAO[1], second=5)
         while agora() < alvo:
             time.sleep(min(300, max(1, (alvo - agora()).total_seconds())))
-            sinal_de_vida()
 
 
 def main():
@@ -258,7 +321,10 @@ def main():
     if sys.stdout is None or os.getenv("AURUM_OCULTO"):  # rodando escondido (pythonw): tudo vai para o arquivo de log
         LOG.parent.mkdir(parents=True, exist_ok=True)
         if LOG.exists() and LOG.stat().st_size > 5_000_000:  # não deixa o log crescer para sempre
-            LOG.replace(LOG.with_suffix(".log.antigo"))
+            try:
+                LOG.replace(LOG.with_suffix(".log.antigo"))
+            except OSError:  # outra cópia está usando o log: segue no mesmo arquivo
+                pass
         sys.stdout = sys.stderr = open(LOG, "a", encoding="utf-8", buffering=1)
     alertas.carregar_config()
     if a.agora:
