@@ -280,7 +280,7 @@ def rodar(rk: pd.DataFrame, precos: dict[str, pd.Series], fatores: dict[str, pd.
     if len(tab):
         tab = tab.merge(rk[["ticker", "setor"]], on="ticker", how="left")
         tab["vento_quintil"] = tab["vento"].rank(pct=True)
-        setores = (tab.groupby("setor").agg(vento=("vento", "median"), acoes=("ticker", "count"))
+        setores = (tab.groupby("setor").agg(vento=("vento", "mean"), acoes=("ticker", "count"))
                    .reset_index().sort_values("vento", ascending=False))
     leitura = None
     if usar_ia:
