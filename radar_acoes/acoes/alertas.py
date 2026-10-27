@@ -60,7 +60,7 @@ def gerar(atual: pd.DataFrame, anterior: pd.DataFrame | None, noticias: dict[str
         if r.get("consenso") == "Compra forte" and (a is None or a.get("consenso") != "Compra forte"):
             placar = f"{r.get('placar', 0):+.2f}".replace(".", ",")
             add(1, "Mesa", t, f"A mesa de analistas chegou a consenso de COMPRA FORTE em {t} "
-                              f"({int(r.get('a_favor', 0))} de 7 agentes a favor, placar {placar}).")
+                              f"({int(r.get('a_favor', 0))} agentes a favor, placar {placar}).")
         # Entrou/saiu do top
         if a is not None and r["posicao"] <= top < a["posicao"]:
             add(2, "Ranking", t, f"{t} entrou no top {top} (era {int(a['posicao'])}º, agora {int(r['posicao'])}º).")

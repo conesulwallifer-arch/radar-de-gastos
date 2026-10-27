@@ -94,6 +94,21 @@ rodar escondida e **liga sozinha sempre que o Windows iniciar** — não precisa
 | Dias úteis, 18h30 | Todos | Reunião completa: coleta, 7 especialistas, verificação cruzada, Atlas, memória, relatório |
 | Sábado, 10h | AURUM | Reunião semanal: o que mudou na semana, placar real da equipe, anotações do Atlas |
 
+### 🔭 Equipe de previsibilidade (Otto, Bento e Sofia)
+Três especialistas em prever, cada um **testado no passado sem colar** — o placar fica na aba **🔭 Previsões**:
+
+| Agente | Prevê | Como é testado |
+|---|---|---|
+| 💵 **Otto** — Previsor de Proventos | Proventos dos próximos 12 meses (com faixa provável) e a **chance de corte** | Para cada um dos últimos 6 anos, prevê só com os anos anteriores e confere o que foi pago |
+| 🎯 **Bento** — Estrategista de Entrada | Preço da **ordem de compra** com ~80% e ~50% de chance de executar em 1 mês | Aprende os níveis até 1 ano atrás e confere no último ano se 80% e 50% se confirmaram |
+| 🧮 **Sofia** — Cientista de Dados | Chance de cada ação render **mais que a mediana** das outras em 3 meses (momento, tendência, oscilação, dividendos, distância do topo) | Treina e testa mês a mês (36 meses, com intervalo de segurança); só vota se o ganho for estatisticamente real (t ≥ 2) |
+
+Otto e Sofia votam na mesa (Bento só informa o preço). Quem não prova vantagem no teste fica neutro — o mesmo vale para a Íris.
+
+### 🔄 Atualizar
+Dê dois cliques em **`Atualizar AURUM.bat`**: baixa a versão mais nova, mantém `dados_acoes` e `config.env`,
+reinicia a Equipe 24h (se estiver ligada) e abre o painel.
+
 ### 📡 Mercado ao vivo
 A aba **📡 Mercado ao vivo** mostra todas as ações acompanhadas no pregão de hoje — o que **sobe** e o que **cai**,
 o Ibovespa, mínima/máxima e o gráfico do dia — e **se atualiza sozinha a cada minuto** (dá para pausar no botão *Ao vivo*).

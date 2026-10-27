@@ -19,7 +19,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, escritorio, dados, demo, aurum, macro, memoria, mesa, meta, noticias, plano, previsao, previsor, universo  # noqa: E402
+from acoes import AVISO, DADOS, alertas, analise, aporte, atlas, backtest, escritorio, dados, demo, aurum, macro, memoria, mesa, meta, noticias, oraculos, plano, previsao, previsor, universo  # noqa: E402
 
 HIST = DADOS / "historico"
 REL = DADOS / "relatorios"
@@ -133,15 +133,41 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
                                        "ret_mediano": "ret_mediano_1m", "ret_p10": "ret_p10_1m", "ret_p90": "ret_p90_1m"}),
                       on="ticker", how="left")
     placar = previsor.placar_real(precos_base)
-
-    print("🧠 Mesa de analistas: 7 agentes analisando cada ação...")
-    falar("🧠 Cada agente está consultando a própria memória (votos passados × o que aconteceu de verdade)...")
     proventos_base = {t: d["proventos"] for t, d in base.items()}
+
+    print("🔭 Equipe de previsibilidade: Otto (proventos), Bento (entrada) e Sofia (modelo conjunto)...")
+    falar("💵 **Otto** está prevendo os proventos dos próximos 12 meses e a chance de corte — e conferindo o próprio placar...")
+    falar("🎯 **Bento** está calculando o preço certo para a ordem de compra de cada ação...")
+    falar("🧮 **Sofia** está treinando e testando o modelo conjunto (sem olhar o futuro)...")
+    escritorio.status(["proventos", "entrada", "conjunto"], "trabalhando", "prevendo e testando no passado")
+    try:
+        orac = oraculos.rodar(rk, precos_base, proventos_base, hoje)
+    except Exception as e:  # noqa: BLE001 — previsão extra nunca derruba a apuração
+        print(f"  [aviso] equipe de previsibilidade: {e}")
+        orac = {"tabela": pd.DataFrame(), "placar": {}}
+    if len(orac["tabela"]):
+        rk = rk.merge(orac["tabela"], on="ticker", how="left")
+    po, pb, ps = (orac["placar"].get(k, {}) for k in ("otto", "bento", "sofia"))
+    fator_sofia = float(ps.get("fator", 0.0) or 0.0)
+    if po.get("n"):
+        escritorio.registrar("proventos", f"previu os proventos de {len(orac['tabela'])} ações; no teste de {po['n']} anos-ação, "
+                             f"errou por menos de 25% em {po['acerto'] * 100:.0f}% das vezes".replace(".", ","))
+    if pb.get("n"):
+        escritorio.registrar("entrada", f"calculou os preços de entrada; no teste, a ordem de '80%' executou em {pb['real_80'] * 100:.0f}% "
+                             f"e a de '50%' em {pb['real_50'] * 100:.0f}% das vezes")
+    if ps.get("n"):
+        escritorio.registrar("conjunto", (f"testou o modelo em {ps['meses']} meses: acerto {ps['acerto'] * 100:.1f}% (chute = 50%) — "
+                                          + ("vai votar" if fator_sofia > 0 else "não bateu o chute, não vota")).replace(".", ","))
+    escritorio.status(["proventos", "entrada", "conjunto"], "pausa", "previsões do dia entregues")
+
+    print("🧠 Mesa de analistas: 10 agentes analisando cada ação...")
+    falar("🧠 Cada agente está consultando a própria memória (votos passados × o que aconteceu de verdade)...")
     cerebro = memoria.avaliar(precos_base, proventos_base)
     aprendizado = memoria.fatores(cerebro)
     falar("🧠 Reunião da mesa de analistas começou.")
     reuniao = mesa.reuniao(rk, precos_base, news, mac, prev_cal, fator, cart, str(hoje), usar_ia=usar_ia,
-                           progresso=falar, aprendizado=aprendizado, cerebro=cerebro)
+                           progresso=falar, aprendizado=aprendizado, cerebro=cerebro,
+                           oraculos=orac["tabela"], fator_sofia=fator_sofia)
     reuniao["cerebro"] = cerebro
     if not usar_demo:  # dados fictícios nunca entram na memória dos agentes
         # a decisão da EQUIPE também vai para a memória: é assim que se mede se o time está acertando
@@ -187,7 +213,8 @@ def apurar(tickers: list[str], valor_aporte: float = 0.0, usar_demo: bool = Fals
                  "proventos": {t: d["proventos"] for t, d in base.items()},
                  "info": {t: d["info"] for t, d in base.items()},
                  "macro": mac, "backtest": bt, "carteira_esperada": cart_esp, "ibov": ibov,
-                 "mesa": reuniao, "previsor": {"validacao": validacao, "fator": fator, "placar_real": placar}}
+                 "mesa": reuniao, "previsor": {"validacao": validacao, "fator": fator, "placar_real": placar},
+                 "oraculos": orac["placar"]}
     print("🪙 AURUM escrevendo o relatório do dia" + (" (IA + pesquisa na web)..." if usar_ia and aurum.ia_disponivel() else "..."))
     falar("🧭 **Atlas** (explorador autônomo) está decidindo por conta própria o que investigar...")
     resumo_atlas = mesa.resumo_texto(reuniao) + "\n" + "\n".join(

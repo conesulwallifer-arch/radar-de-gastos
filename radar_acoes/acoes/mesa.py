@@ -1,4 +1,4 @@
-"""Mesa de analistas: sete agentes especialistas analisam cada ação, votam e o AURUM consolida o consenso.
+"""Mesa de analistas: dez agentes especialistas analisam cada ação, votam e o AURUM consolida o consenso.
 
 Cada agente olha a ação por um ângulo e devolve um voto de -2 (fortemente contra) a +2 (fortemente a favor),
 com os argumentos. O Gestor de Risco pode VETAR (ex.: prejuízo, dado duvidoso, notícia grave).
@@ -289,7 +289,93 @@ class Risco(Agente):
         return o
 
 
-AGENTES: list[Agente] = [Renda(), Fundamentos(), Valuation(), Tendencia(), Noticias(), Previsor(), Risco()]
+def _r(x) -> str:
+    return "—" if not _ok(x) else f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+class Proventos(Agente):
+    id, nome, icone, peso = "proventos", "Previsor de Proventos", "💵", 1.2
+    apelido = "Otto"
+    especialidade = "Quanto a ação vai pagar nos próximos 12 meses e a chance de cortar os proventos — testado no passado."
+
+    def avaliar(self, r, ctx):
+        o = Opiniao()
+        x = ctx.get("oraculos", {}).get(r["ticker"])
+        if not x or not _ok(x.get("otto_prov_12m")):
+            o.argumentos.append("Sem histórico de proventos suficiente para prever.")
+            return o
+        prev, pc, ac, n = x["otto_prov_12m"], x.get("otto_prob_corte"), x.get("otto_acerto"), int(x.get("otto_anos_testados") or 0)
+        dy = prev / r["preco"] if _ok(r.get("preco")) and r["preco"] else float("nan")
+        faixa = (f" (faixa provável {_r(x.get('otto_prov_p10'))} a {_r(x.get('otto_prov_p90'))})"
+                 if _ok(x.get("otto_prov_p10")) and _ok(x.get("otto_prov_p90")) else "")
+        o.argumentos.append(f"Prevejo {_r(prev)} por ação nos próximos 12 meses{faixa} — {_p(dy)} sobre o preço de hoje.")
+        if n:
+            o.argumentos.append(f"No teste dos últimos {n} anos (sem olhar o futuro), meu método errou por menos de 25% em {_p(ac, 0)} das vezes.")
+        motivo = f" ({x['otto_motivos_corte']})" if x.get("otto_motivos_corte") else ""
+        if _ok(pc) and pc >= 0.40:
+            o.add(-2, f"Risco ALTO de cortar os proventos: {_p(pc, 0)} de chance{motivo}.")
+        elif _ok(pc) and pc >= 0.28:
+            o.add(-1, f"Risco de corte acima do normal: {_p(pc, 0)}{motivo}.")
+        elif n >= 3 and _ok(ac) and ac >= 0.6 and _ok(pc) and pc <= 0.15:
+            o.add(2, f"Proventos muito previsíveis e risco de corte baixo ({_p(pc, 0)}): ótima para o projeto de renda.")
+        elif n >= 3 and _ok(ac) and ac >= 0.5 and _ok(pc) and pc <= 0.25:
+            o.add(1, f"Proventos razoavelmente previsíveis; risco de corte {_p(pc, 0)}.")
+        else:
+            o.argumentos.append(f"Proventos pouco previsíveis (risco de corte {_p(pc, 0)}): não aposto nesta como base da renda.")
+        return o
+
+
+class Entrada(Agente):
+    id, nome, icone, peso = "entrada", "Estrategista de Entrada", "🎯", 0.0  # não vota: diz a que preço comprar
+    apelido = "Bento"
+    especialidade = "A que preço pôr a ordem de compra, pela oscilação real da ação em 1 mês."
+
+    def avaliar(self, r, ctx):
+        o = Opiniao()
+        x = ctx.get("oraculos", {}).get(r["ticker"])
+        if not x or not _ok(x.get("bento_preco_80")):
+            o.argumentos.append("Histórico curto para calcular o ponto de entrada.")
+            return o
+        o.argumentos.append(f"Ordem de compra a {_r(x['bento_preco_80'])}: ~80% de chance de executar no próximo mês; "
+                            f"a {_r(x['bento_preco_50'])}: ~50%.")
+        pt, teto = x.get("bento_prob_tocar_teto"), r.get("preco_teto_bazin")
+        if _ok(teto) and _ok(r.get("preco")):
+            if r["preco"] <= teto:
+                o.argumentos.append(f"Já está abaixo do preço-teto ({_r(teto)}): dá para comprar sem esperar.")
+            elif _ok(pt):
+                o.argumentos.append(f"Para chegar ao preço-teto ({_r(teto)}) precisa cair {_p(1 - teto / r['preco'], 0)}; "
+                                    f"chance disso em 1 mês: {_p(pt, 0)}.")
+        o.argumentos.append("Não voto: meu papel é o preço de entrada, não o que comprar.")
+        return o
+
+
+class Conjunto(Agente):
+    id, nome, icone, peso = "conjunto", "Cientista de Dados", "🧮", 0.7
+    apelido = "Sofia"
+    especialidade = "Modelo que junta vários sinais e estima a chance de render mais que as outras ações em 3 meses."
+
+    def avaliar(self, r, ctx):
+        o = Opiniao()
+        x = ctx.get("oraculos", {}).get(r["ticker"])
+        fator = ctx.get("fator_sofia", 0.0)
+        if not x or not _ok(x.get("sofia_prob")):
+            o.argumentos.append("Sem dados suficientes para o modelo.")
+            return o
+        if fator <= 0:
+            o.argumentos.append("No teste sem colar, meu modelo não bateu o chute: não estou votando (honestidade acima de tudo).")
+            return o
+        q = x.get("sofia_quintil")
+        o.argumentos.append(f"Chance de render mais que a mediana das ações nos próximos 3 meses: {_p(x['sofia_prob'], 0)}.")
+        if _ok(q) and q > 0.8:
+            o.add(1, "Está entre as 20% mais bem colocadas do modelo — o grupo que, no teste, rendeu mais que o resto.")
+        elif _ok(q) and q <= 0.2:
+            o.add(-1, "Está entre as 20% piores do modelo para os próximos 3 meses: pode valer esperar.")
+        return o
+
+
+AGENTES: list[Agente] = [Renda(), Fundamentos(), Valuation(), Tendencia(), Noticias(), Previsor(), Risco(),
+                         Proventos(), Entrada(), Conjunto()]
+ESTATISTICOS = {"previsor", "proventos", "entrada", "conjunto"}  # previsões numéricas: a IA não revisa estes
 POR_ID = {a.id: a for a in AGENTES}
 
 
@@ -334,6 +420,11 @@ def verificacao_cruzada(rk: pd.DataFrame, opinioes: dict, ctx: dict) -> list[dic
                 txt = ("o caixa livre é negativo" if r["payout_fcl"] == float("inf")
                        else f"os dividendos consomem {_p(r['payout_fcl'], 0)} do caixa livre")
                 contestar("fundamentos", "renda", t, f"{txt}: pagamento financiado, não sustentável.", ops["renda"]["voto"] - 1)
+        # Otto (previsor de proventos) confere Dora: o risco de corte desmente o otimismo com a renda?
+        ox = ctx.get("oraculos", {}).get(t) or {}
+        if ops["renda"]["voto"] > 0 and _ok(ox.get("otto_prob_corte")) and ox["otto_prob_corte"] >= 0.30:
+            contestar("proventos", "renda", t, f"a chance de corte dos proventos está em {_p(ox['otto_prob_corte'], 0)}; "
+                      "o histórico bom pode não se repetir.", ops["renda"]["voto"] - 1)
         # Dora (dividendos) confere Vitória (valuation): o preço-teto está inflado?
         if ops["valuation"]["voto"] > 0:
             dy12, dy5, g = r.get("dy_12m"), r.get("dy_medio_5a"), r.get("cresc_proventos_5a")
@@ -419,7 +510,7 @@ def _pesquisar_noticias(cand: pd.DataFrame) -> str | None:
 def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previsoes: pd.DataFrame | None = None,
             fator_previsor: float = 0.0, carteira: pd.DataFrame | None = None, data: str = "",
             usar_ia: bool = True, n_ia: int = 8, progresso=None, aprendizado: dict | None = None,
-            cerebro: dict | None = None) -> dict:
+            cerebro: dict | None = None, oraculos: pd.DataFrame | None = None, fator_sofia: float = 0.0) -> dict:
     """Roda todos os agentes em todas as ações. Retorna {'consenso': DataFrame, 'opinioes': {...}, 'log': [...], 'ia': bool}."""
     exposicao = {}
     if carteira is not None and len(carteira):
@@ -430,8 +521,15 @@ def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previso
         for t, v in val.items():
             exposicao[setor_rk.get(t, "Outros")] = exposicao.get(setor_rk.get(t, "Outros"), 0) + v / tot
     prev_map = {r["ticker"]: r.to_dict() for _, r in previsoes.iterrows()} if previsoes is not None and len(previsoes) else {}
+    orac = {}
+    if oraculos is not None and len(oraculos):
+        oc = oraculos.copy()
+        if "sofia_prob_bruta" in oc:
+            oc["sofia_quintil"] = oc["sofia_prob_bruta"].rank(pct=True)
+        orac = {r_["ticker"]: r_.to_dict() for _, r_ in oc.iterrows()}
     ctx = {"precos": precos, "noticias": noticias or {}, "macro": macro or {}, "previsoes": prev_map,
-           "fator_previsor": fator_previsor, "exposicao_setor": exposicao, "data": data, "memoria": {}}
+           "fator_previsor": fator_previsor, "exposicao_setor": exposicao, "data": data, "memoria": {},
+           "oraculos": orac, "fator_sofia": fator_sofia}
     pa = (cerebro or {}).get("por_agente")
     if pa is not None and len(pa):
         for _, m in pa.iterrows():
@@ -475,8 +573,8 @@ def reuniao(rk: pd.DataFrame, precos: dict, noticias: dict, macro: dict, previso
             falar("   ✓ " + log[-1])
             escritorio.registrar("noticias", f"pesquisou na internet notícias de {len(cand)} candidatas")
         for ag in AGENTES:
-            if ag.id == "previsor":
-                continue  # previsão é estatística; a IA não acrescenta aqui
+            if ag.id in ESTATISTICOS:
+                continue  # previsão é estatística e testada no passado; a IA não acrescenta aqui
             falar(f"{ag.icone} **{ag.apelido}** (IA) está revisando as {len(cand)} melhores candidatas...")
             escritorio.status(ag.id, "trabalhando", f"revisando com IA as {len(cand)} melhores candidatas")
             votos = _revisao_ia(ag, cand, opinioes, ctx, pesquisa if ag.id in ("noticias", "risco") else None)

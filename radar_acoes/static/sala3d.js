@@ -200,6 +200,29 @@ const TELAS = {
     ctx.quadraticCurveTo(96, 110, 56, 124); ctx.quadraticCurveTo(16, 110, 16, 70); ctx.lineTo(16, 34); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#00C176'; ctx.font = '700 36px Arial'; ctx.textAlign = 'center'; ctx.fillText('✓', 56, 86);
   },
+  proventos(ctx, t) {
+    ctx.fillStyle = 'rgba(0,193,118,.15)'; ctx.fillRect(16, 30, 224, 40); ctx.strokeStyle = '#00C176'; ctx.setLineDash([6, 4]); ctx.strokeRect(16, 30, 224, 40); ctx.setLineDash([]);
+    for (let i = 0; i < 12; i++) {
+      const h = 40 + 30 * (0.5 + 0.5 * Math.sin(i * 0.9)) * Math.min(1, Math.max(0, t * 0.6 - i * 0.15 + 1));
+      ctx.fillStyle = '#D4AF37'; ctx.fillRect(18 + i * 19, 134 - h, 14, h);
+    }
+    ctx.fillStyle = '#00C176'; ctx.font = '700 18px monospace'; ctx.textAlign = 'left'; ctx.fillText('R$ 12 MESES', 20, 24);
+  },
+  entrada(ctx, t) {
+    ctx.strokeStyle = '#4DA3FF'; ctx.lineWidth = 3; ctx.beginPath();
+    for (let x = 10; x <= 246; x += 6) { const y = 60 + Math.sin(x / 18 + t * 1.5) * 22 + Math.sin(x / 7) * 6; x === 10 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+    ctx.stroke(); ctx.setLineDash([8, 6]); ctx.strokeStyle = '#00C176'; ctx.beginPath(); ctx.moveTo(10, 96); ctx.lineTo(246, 96); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = Math.sin(t * 4) > 0 ? '#00C176' : '#0b3a24'; ctx.beginPath(); ctx.arc(170, 96, 7, 0, 7); ctx.fill();
+    ctx.fillStyle = '#00C176'; ctx.font = '700 16px monospace'; ctx.textAlign = 'left'; ctx.fillText('ORDEM 80%', 14, 128);
+  },
+  conjunto(ctx, t) {
+    ['#00C176', '#4DA3FF', '#F5A623', '#B388FF', '#FF4D4F', '#E8E6E1'].forEach((c, i) => {
+      ctx.strokeStyle = c; ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(t * 2 + i)); ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(14, 18 + i * 21); ctx.lineTo(150, 72); ctx.stroke();
+    });
+    ctx.globalAlpha = 1; ctx.fillStyle = '#234A6B'; ctx.beginPath(); ctx.arc(170, 72, 30, 0, 7); ctx.fill(); ctx.strokeStyle = '#4DA3FF'; ctx.stroke();
+    ctx.fillStyle = '#E8E6E1'; ctx.font = '700 22px monospace'; ctx.textAlign = 'center'; ctx.fillText(`${Math.round(52 + Math.sin(t) * 3)}%`, 170, 80);
+  },
   atlas(ctx, t) {
     ctx.fillStyle = '#1E3A5F'; ctx.beginPath(); ctx.arc(100, 72, 52, 0, 7); ctx.fill(); ctx.strokeStyle = '#4DA3FF'; ctx.lineWidth = 2; ctx.stroke();
     ctx.beginPath(); ctx.ellipse(100, 72, Math.abs(Math.cos(t)) * 52 + 2, 52, 0, 0, 7); ctx.stroke();
@@ -310,9 +333,11 @@ function rotuloMesa(nome) {
 }
 
 // ------------------------------------------------------------------ monta a equipe
+const NCOL = DADOS.agentes.length > 9 ? 4 : 3;           // equipe maior: 4 mesas por fileira
+if (NCOL === 4) camera.position.set(0, 8.4, 16.2);        // afasta a câmera para caber a sala inteira
 const agentes = DADOS.agentes.map((d, i) => {
-  const col = i % 3, lin = Math.floor(i / 3);
-  return agente(d, (col - 1) * 6.4, (lin - 1) * 5.2 - 1.6);
+  const col = i % NCOL, lin = Math.floor(i / NCOL);
+  return agente(d, (col - (NCOL - 1) / 2) * (NCOL === 4 ? 5.6 : 6.4), (lin - 1) * 5.2 - 1.6);
 });
 
 // ------------------------------------------------------------------ animação

@@ -247,6 +247,9 @@ APARENCIA = {
     "previsor":    {"pele": "#F1C27D", "cabelo": "#3A2A5C", "estilo": "longo", "roupa": "#4B3A7A", "acessorio": "tiara"},
     "risco":       {"pele": "#C68642", "cabelo": "#1A1A1A", "estilo": "curto", "roupa": "#2F3B2F", "acessorio": "bone"},
     "atlas":       {"pele": "#FFDBAC", "cabelo": "#6B4423", "estilo": "curto", "roupa": "#6B5B3E", "acessorio": "chapeu"},
+    "proventos":   {"pele": "#E0AC69", "cabelo": "#4A3728", "estilo": "curto", "roupa": "#1F5E3A", "acessorio": "oculos"},
+    "entrada":     {"pele": "#8D5524", "cabelo": "#2B1B10", "estilo": "curto", "roupa": "#7A4B1E", "acessorio": "bone"},
+    "conjunto":    {"pele": "#FFDBAC", "cabelo": "#1A1A1A", "estilo": "longo", "roupa": "#234A6B", "acessorio": "oculos"},
 }
 
 
@@ -296,6 +299,22 @@ def _tela(aid: str) -> str:
                 '<circle class="sa-alvo" cx="74" cy="18" r="2" fill="#FF4D4F"/><circle class="sa-alvo" style="animation-delay:.8s" cx="58" cy="38" r="2" fill="#F5A623"/>'
                 '<path d="M18,10 L34,15 L34,28 C34,38 26,44 18,47 C10,44 2,38 2,28 L2,15 Z" fill="#2F3B2F" stroke="#00C176" stroke-width="1.5"/>'
                 '<text x="18" y="32" text-anchor="middle" font-size="12" fill="#00C176">✓</text>')
+    if aid == "proventos":  # moedas empilhando mês a mês + faixa prevista
+        moedas = "".join(f'<rect class="sa-barra" style="animation-delay:{k * .2}s" x="{8 + k * 14}" y="{48 - h}" width="10" height="{h}" rx="2" fill="#D4AF37"/>'
+                         for k, h in enumerate([12, 14, 13, 16, 18, 17]))
+        return (moedas + '<rect x="6" y="14" width="86" height="12" fill="rgba(0,193,118,.15)" stroke="#00C176" stroke-dasharray="2 2"/>'
+                '<text x="50" y="11" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="7" fill="#00C176">R$ 12m</text>')
+    if aid == "entrada":  # preço oscilando e a linha da ordem de compra
+        return ('<polyline points="4,20 16,26 26,18 38,32 50,28 60,40 72,34 84,42 92,36" fill="none" stroke="#4DA3FF" stroke-width="1.5"/>'
+                '<line x1="4" y1="40" x2="92" y2="40" stroke="#00C176" stroke-dasharray="3 2"/>'
+                '<circle class="sa-alvo" cx="60" cy="40" r="3" fill="#00C176"/>'
+                '<text x="6" y="50" font-family="IBM Plex Mono,monospace" font-size="7" fill="#00C176">ORDEM 80%</text>')
+    if aid == "conjunto":  # vários sinais virando uma probabilidade
+        linhas = "".join(f'<line x1="6" y1="{10 + k * 9}" x2="56" y2="28" stroke="{c}" stroke-opacity=".7"/>'
+                         for k, c in enumerate(["#00C176", "#4DA3FF", "#F5A623", "#B388FF", "#FF4D4F"]))
+        return (linhas + '<circle cx="66" cy="28" r="12" fill="#234A6B" stroke="#4DA3FF"/>'
+                '<g class="sa-marcador"><text x="66" y="31" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8" fill="#E8E6E1">p</text></g>'
+                '<text x="84" y="31" font-family="IBM Plex Mono,monospace" font-size="7" fill="#00C176">52%</text>')
     if aid == "atlas":  # globo + lupa explorando
         return ('<circle cx="40" cy="28" r="20" fill="#1E3A5F" stroke="#4DA3FF"/>'
                 '<ellipse class="sa-meridiano" cx="40" cy="28" rx="8" ry="20" fill="none" stroke="#4DA3FF"/>'
@@ -395,7 +414,8 @@ def boneco(aid: str, estado: str) -> str:
 
 
 EQUIPE_NOME = {"aurum": "AURUM", "renda": "Dora", "fundamentos": "Fausto", "valuation": "Vitória", "tendencia": "Téo",
-               "noticias": "Nina", "previsor": "Íris", "risco": "Rex", "atlas": "Atlas"}
+               "noticias": "Nina", "previsor": "Íris", "risco": "Rex", "atlas": "Atlas",
+               "proventos": "Otto", "entrada": "Bento", "conjunto": "Sofia"}
 
 CSS_SALA = """
 <style>

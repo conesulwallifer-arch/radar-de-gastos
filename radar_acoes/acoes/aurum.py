@@ -66,6 +66,10 @@ def contexto(R: dict, pl: dict | None = None, cart: pd.DataFrame | None = None) 
             "anos_pagando_de_10": int(r["anos_pagou_10"]), "roe": round(float(r["roe"]), 3) if r["roe"] == r["roe"] else None,
             "meses_que_paga": r.get("meses_provaveis"), "por_que": r.get("por_que"), "avisos": r.get("avisos_dados") or None,
             "consenso_mesa": r.get("consenso"), "chance_alta_1m": r.get("prob_alta_1m"),
+            "otto_proventos_12m_faixa": [_arred(r.get("otto_prov_p10")), _arred(r.get("otto_prov_12m")), _arred(r.get("otto_prov_p90"))],
+            "otto_chance_corte": _arred(r.get("otto_prob_corte"), 3), "otto_acerto_historico": _arred(r.get("otto_acerto"), 3),
+            "bento_ordem_80pct": _arred(r.get("bento_preco_80")), "bento_ordem_50pct": _arred(r.get("bento_preco_50")),
+            "sofia_chance_superar_3m": _arred(r.get("sofia_prob"), 3),
         }.items()}
 
     imp = [a for a in R.get("alertas", []) if a["nivel"] == 1]
@@ -94,10 +98,50 @@ def contexto(R: dict, pl: dict | None = None, cart: pd.DataFrame | None = None) 
         "teste_no_passado": {k: bt.get(k) for k in ("meses", "investido", "sistema", "tir_sistema", "cdi", "tir_cdi", "ibovespa", "tir_ibovespa")} if bt else None,
         "mesa_de_analistas": ({"resumo": mesa_mod.resumo_texto(R["mesa"]), "atividade": R["mesa"]["log"]} if R.get("mesa") else None),
         "previsora_iris": _iris(R),
+        "equipe_previsibilidade": _previsibilidade(R),
         "atlas_explorador": (R.get("atlas") or {}).get("relatorio"),
         "noticias_recentes": {t: [f"{n['titulo']} ({n['fonte']}, tom {n['tom']})" for n in v[:4]]
                               for t, v in (R.get("noticias") or {}).items() if t in {x["ticker"] for _, x in rk.head(10).iterrows()}},
     }
+
+
+def _arred(x, casas: int = 2):
+    return None if x is None or x != x else round(float(x), casas)
+
+
+def _previsibilidade(R: dict) -> dict | None:
+    """Otto, Bento e Sofia: placar no teste sem colar + previsões das ações que estamos para comprar."""
+    pl = R.get("oraculos")
+    rk = R["ranking"]
+    if not pl or "otto_prov_12m" not in rk:
+        return None
+    alvo = rk[rk["sinal"].isin(["Comprar", "Acumular"])].head(6)
+    return {
+        "placar": {"otto": pl.get("otto"), "bento": pl.get("bento"),
+                   "sofia": {k: v for k, v in (pl.get("sofia") or {}).items() if k != "pesos"}},
+        "para_comprar": [{"ticker": r["ticker"], "proventos_12m": _arred(r.get("otto_prov_12m")),
+                          "faixa": [_arred(r.get("otto_prov_p10")), _arred(r.get("otto_prov_p90"))],
+                          "chance_corte": _arred(r.get("otto_prob_corte"), 3), "ordem_80": _arred(r.get("bento_preco_80")),
+                          "ordem_50": _arred(r.get("bento_preco_50")), "sofia": _arred(r.get("sofia_prob"), 3)}
+                         for _, r in alvo.iterrows()],
+    }
+
+
+def texto_previsibilidade(c: dict) -> str | None:
+    e = c.get("equipe_previsibilidade")
+    if not e or not e["para_comprar"]:
+        return None
+    po = (e["placar"] or {}).get("otto") or {}
+    itens = []
+    for x in e["para_comprar"][:3]:
+        partes = [f"**{x['ticker']}**: Otto prevê {_r(x['proventos_12m'])}/ação em 12 meses"
+                  + (f" (risco de corte {_p(x['chance_corte'], 0)})" if x["chance_corte"] is not None else "")]
+        if x["ordem_80"]:
+            partes.append(f"Bento sugere ordem a {_r(x['ordem_80'])} (80% de chance de executar em 1 mês)")
+        itens.append(", ".join(partes))
+    teste = (f" No teste sem colar, o método de proventos do Otto errou por menos de 25% em {_p(po.get('acerto'), 0)} dos casos."
+             if po.get("n") else "")
+    return "🔭 Previsões para o que está na lista de compras — " + "; ".join(itens) + "." + teste
 
 
 def _iris(R: dict) -> dict | None:
@@ -159,7 +203,10 @@ def relatorio_regras(c: dict) -> list[str]:
     linhas.append(f"🏦 Cenário: Selic {_p(mac['selic'], 2)}, inflação {_p(mac['ipca_12m'])}. Para comparação, {cmp}"
                   + (" (taxas estimadas: Banco Central fora do ar)" if mac["estimado"] else ""))
     if c.get("mesa_de_analistas"):
-        linhas.append(f"🧠 Mesa de analistas (Dora, Fausto, Vitória, Téo, Nina, Íris e Rex): {c['mesa_de_analistas']['resumo']}.")
+        linhas.append(f"🧠 Mesa de analistas (Dora, Fausto, Vitória, Téo, Nina, Íris, Rex, Otto, Bento e Sofia): {c['mesa_de_analistas']['resumo']}.")
+    tp = texto_previsibilidade(c)
+    if tp:
+        linhas.append(tp)
     if c.get("previsora_iris"):
         linhas.append(texto_iris(c))
     if c.get("atlas_explorador"):
@@ -200,6 +247,11 @@ def responder_regras(pergunta: str, c: dict, R: dict) -> str:
                f"Preço {_r(r['preco'])}, preço-teto {_r(r['preco_teto_bazin'])}. {r['por_que']} "
                f"Previsão de proventos nos próximos 12 meses: {_r(r.get('proventos_previstos_12m'))} por ação ({_p(r.get('dy_previsto'))}). "
                f"Confiança dos dados: {r.get('confianca', '—')}.")
+        if _arred(r.get("otto_prov_12m")) is not None:
+            txt += (f" 💵 Otto: {_r(r['otto_prov_12m'])} por ação em 12 meses (faixa {_r(r.get('otto_prov_p10'))} a {_r(r.get('otto_prov_p90'))}), "
+                    f"risco de corte {_p(r.get('otto_prob_corte'), 0)}.")
+        if _arred(r.get("bento_preco_80")) is not None:
+            txt += f" 🎯 Bento: ordem a {_r(r['bento_preco_80'])} executa ~80% das vezes em 1 mês; a {_r(r.get('bento_preco_50'))}, ~50%."
         if R.get("mesa") and t in R["mesa"]["opinioes"]:
             ops = R["mesa"]["opinioes"][t]
             txt += f"\n\nMesa de analistas: **{r.get('consenso', '—')}**. " + " ".join(

@@ -195,7 +195,7 @@ def test_mesa_vota_veta_e_confere():
                      data=str(HOJE.date()), usar_ia=False)
     c = m["consenso"].set_index("ticker")
     assert c.loc[rk.loc[0, "ticker"], "vetado"] and c.loc[rk.loc[0, "ticker"], "consenso"] == "Vetado"
-    assert len(m["opinioes"][rk.loc[2, "ticker"]]) == 7
+    assert len(m["opinioes"][rk.loc[2, "ticker"]]) == len(mesa.AGENTES)
     assert any(v["verificador"].endswith("Fausto") and v["ticker"] == rk.loc[1, "ticker"] for v in m["verificacoes"])
 
 
@@ -380,7 +380,7 @@ def test_sala_3d_tem_arquivos_e_dados(monkeypatch):
     h = capturado["html"]
     assert '"three": "/app/static/three.module.min.js"' in h and "/app/static/sala3d.js" in h
     dados = json.loads(h.split("window.SALA_DADOS = ")[1].split(";</script>")[0])
-    assert len(dados["agentes"]) == 9 and dados["pregao"] is True and dados["fita"][1][2] == 0.0  # NaN vira 0
+    assert len(dados["agentes"]) == len(escritorio.EQUIPE) and dados["pregao"] is True and dados["fita"][1][2] == 0.0  # NaN vira 0
 
 
 # ---------------------------------------------------------------- mercado ao vivo
@@ -420,3 +420,59 @@ def test_mercado_ao_vivo_variacao_do_dia():
     # sem o diário, usa a última cotação de ontem como referência
     so_intra = aovivo.resumir(aovivo._colunas(intra, sims), {}).set_index("ticker")
     assert so_intra.loc["CAI3", "var_dia"] == pytest.approx(-0.05)
+
+
+# ---------------------------------------------------------------- equipe de previsibilidade (Otto, Bento, Sofia)
+from acoes import oraculos  # noqa: E402
+
+
+def test_otto_prev_estavel_e_detecta_corte():
+    dias = pd.bdate_range("2014-01-01", "2026-10-15")
+    precos = pd.Series(20.0, index=dias)
+    hoje = pd.Timestamp("2026-10-15")
+    estavel = pd.Series(1.0, index=pd.DatetimeIndex([pd.Timestamp(a, m, 15) for a in range(2014, 2026) for m in (3, 9)]))
+    r = {"proventos_previstos_12m": 2.0, "preco": 20.0}
+    o = oraculos.otto(r, estavel, precos, hoje)
+    assert o["otto_acerto"] == 1.0 and o["otto_prob_corte"] < 0.12 and o["otto_anos_testados"] >= 5
+    # empresa que corta: paga 1,0 por semestre e despenca para 0,2 nos últimos anos, com lucro caindo e payout > 100%
+    valores = [1.0 if a < 2022 else 0.2 for a in range(2014, 2026) for _ in (3, 9)]
+    corta = pd.Series(valores, index=estavel.index)
+    o2 = oraculos.otto({"proventos_previstos_12m": 0.5, "preco": 20.0, "payout": 1.3, "cresc_lucro": -0.4}, corta, precos, hoje)
+    assert o2["otto_prob_corte"] > 0.40 and "paga mais do que lucra" in o2["otto_motivos_corte"]
+    # sem colar: a previsão do ano X só usa anos anteriores (mudar 2025 não muda o previsto para 2024)
+    h1 = oraculos.otto_historico(corta, precos, hoje).set_index("ano")
+    mexido = corta.copy()
+    mexido[mexido.index.year == 2025] = 9.0
+    h2 = oraculos.otto_historico(mexido, precos, hoje).set_index("ano")
+    assert h1.loc[2024, "previsto"] == h2.loc[2024, "previsto"] and h1.loc[2025, "real"] != h2.loc[2025, "real"]
+
+
+def test_bento_calibrado_em_passeio_aleatorio():
+    rng = np.random.default_rng(3)
+    dias = pd.bdate_range("2019-01-01", periods=1800)
+    precos = {f"A{i}": pd.Series(30 * np.exp(np.cumsum(rng.normal(0, 0.015, len(dias)))), index=dias) for i in range(20)}
+    v = oraculos.bento_validacao(precos)
+    assert v["n"] > 1000 and abs(v["real_80"] - 0.80) < 0.10 and abs(v["real_50"] - 0.50) < 0.10
+    b = oraculos.bento({"preco": float(precos["A0"].iloc[-1]), "preco_teto_bazin": float(precos["A0"].iloc[-1]) * 0.9}, precos["A0"])
+    assert b["bento_preco_50"] < b["bento_preco_80"] <= float(precos["A0"].iloc[-1])
+    assert 0 < b["bento_prob_tocar_teto"] < 1
+
+
+def test_sofia_nao_vota_quando_e_so_ruido():
+    rng = np.random.default_rng(11)
+    dias = pd.bdate_range("2016-01-01", periods=2500)
+    precos = {f"R{i}": pd.Series(20 * np.exp(np.cumsum(rng.normal(0, 0.018, len(dias)))), index=dias) for i in range(25)}
+    s = oraculos.sofia(precos, {})
+    assert s["validacao"]["n"] > 300
+    assert s["fator"] == 0.0  # sem padrão real, ela não vota
+    assert s["previsoes"]["sofia_prob_bruta"].between(0.35, 0.65).all()  # nada de "certeza" em cima de ruído
+    # com um padrão real (as que mais pagam dividendos rendem mais), ela encontra e ganha voz
+    precos2, prov2 = {}, {}
+    for i in range(25):
+        dy = 0.02 + 0.10 * i / 24
+        ret = rng.normal(0.00012 + 0.9 * dy / 252, 0.012, len(dias))
+        precos2[f"D{i}"] = pd.Series(20 * np.exp(np.cumsum(ret)), index=dias)
+        datas = dias[::63]
+        prov2[f"D{i}"] = pd.Series([float(precos2[f"D{i}"].loc[d]) * dy / 4 for d in datas], index=datas)
+    s2 = oraculos.sofia(precos2, prov2)
+    assert s2["fator"] > 0 and s2["validacao"]["t_stat"] >= 2 and s2["pesos"]["dividendos dos últimos 12 meses"] > 0

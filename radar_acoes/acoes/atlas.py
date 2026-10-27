@@ -86,7 +86,7 @@ FERRAMENTAS = [
                                                                                "f_score_9", "var_12m", "prob_alta_1m"]},
                                      "limite": {"type": "integer", "enum": [5, 10, 20]}}}},
     {"name": "ver_acao", "strict": True,
-     "description": "Ficha completa de uma ação: indicadores, notas por fator no setor, votos e argumentos dos 7 agentes, notícias recentes.",
+     "description": "Ficha completa de uma ação: indicadores, notas por fator no setor, votos e argumentos dos agentes da mesa, notícias recentes.",
      "input_schema": {"type": "object", "additionalProperties": False, "required": ["ticker"],
                       "properties": {"ticker": {"type": "string"}}}},
     {"name": "comparar", "strict": True,

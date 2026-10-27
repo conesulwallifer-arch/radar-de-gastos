@@ -60,8 +60,10 @@ def col_pct(titulo: str, ajuda: str | None = None):
     return st.column_config.NumberColumn(f"{titulo} (%)", format=NUM, help=ajuda)
 
 
-@st.cache_data(show_spinner=False)
-def carregar(_marca: float) -> dict | None:
+@st.cache_data(show_spinner=False, max_entries=2)
+def carregar(marca: float) -> dict | None:
+    """`marca` = data de modificação do arquivo: muda a cada apuração (inclusive as da Equipe 24h), e o painel recarrega.
+    (Sem sublinhado no nome: parâmetro com '_' é ignorado pelo cache do Streamlit e o painel ficava com dados velhos.)"""
     if not ULTIMO.exists():
         return None
     with open(ULTIMO, "rb") as f:
@@ -145,7 +147,7 @@ chips = [("PREGÃO ABERTO" if pregao else "PREGÃO FECHADO", "on" if pregao else
          (f"IPCA {pct(mac['ipca_12m'], 1)}", ""),
          *([(f"FOCUS: SELIC {datetime.now().year + 1} {pct((mac.get('focus') or {}).get(f'selic_{datetime.now().year + 1}'), 2)}", "")]
            if (mac.get("focus") or {}).get(f"selic_{datetime.now().year + 1}") else []),
-         ("8 AGENTES ATIVOS" if R.get("mesa") else "AGENTES AGUARDANDO", "" if R.get("mesa") else "alerta"),
+         (f"{len(escritorio.EQUIPE)} AGENTES ATIVOS" if R.get("mesa") else "AGENTES AGUARDANDO", "" if R.get("mesa") else "alerta"),
          ("IA + PESQUISA WEB" if aurum.ia_disponivel() else "MODO LOCAL (SEM IA)", "" if aurum.ia_disponivel() else "alerta")]
 if R.get("demo"):
     chips.insert(1, ("DADOS FICTÍCIOS", "perigo"))
@@ -164,7 +166,7 @@ if R.get("demo"):
     st.error("⚠️ **MODO DEMONSTRAÇÃO — NÚMEROS FICTÍCIOS.** Nada aqui vale para investir. "
              "Clique em **🔄 Apurar agora (dados reais)** na barra lateral.")
 
-abas = st.tabs(["🪙 AURUM", "📡 Mercado ao vivo", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
+abas = st.tabs(["🪙 AURUM", "📡 Mercado ao vivo", "🔭 Previsões", "🧠 Sala dos Agentes", "✅ O que fazer hoje", "📅 Agenda de proventos", "🎯 Rumo ao R$ 1 milhão", "🏆 Ranking", "🏢 Empresa", "💼 Minha carteira",
                 "🧪 O sistema funciona?", "🔔 Alertas", "❓ Como funciona e limites"])
 
 # carteira-alvo e números da meta, usados em várias abas
@@ -346,8 +348,100 @@ with abas[1]:
 
     _mercado_ao_vivo()
 
-# ======================================================================= SALA DOS AGENTES
+# ======================================================================= PREVISÕES (equipe de previsibilidade)
 with abas[2]:
+    po = (R.get("oraculos") or {}).get("otto") or {}
+    pb = (R.get("oraculos") or {}).get("bento") or {}
+    ps = (R.get("oraculos") or {}).get("sofia") or {}
+    pv_iris = R.get("previsor") or {}
+    st.markdown("### 🔭 Equipe de previsibilidade")
+    st.caption("Quatro especialistas em prever. Cada um é **testado no passado sem colar** (só com os dados que existiam em cada data) "
+               "e o placar fica aqui, à vista. Quem não bate o chute no teste **não vota** até provar valor.")
+    if "otto_prov_12m" not in rk:
+        st.info("A equipe de previsibilidade entra na próxima apuração. Clique em **🔄 Apurar agora** na barra lateral.")
+    else:
+        val_iris = pv_iris.get("validacao") or {}
+        cer = ((R.get("mesa") or {}).get("cerebro") or {}).get("por_agente")
+        eq = cer[cer["agente"] == "equipe"] if cer is not None and len(cer) else pd.DataFrame()
+        visual.cartoes([
+            ("💵 OTTO · PROVENTOS", pct(po.get("acerto"), 0) if po.get("n") else "—",
+             f"previsões a ±25% do que pagou ({po.get('n', 0)} anos-ação)", "ok" if (po.get("acerto") or 0) >= 0.6 else ""),
+            ("🎯 BENTO · ENTRADA", (f"{pct(pb.get('real_80'), 0)} / {pct(pb.get('real_50'), 0)}") if pb.get("n") else "—",
+             "prometeu 80% / 50% de execução", "ok" if pb.get("n") and abs(pb["real_80"] - 0.8) < 0.08 else ""),
+            ("🧮 SOFIA · MODELO", pct(ps.get("acerto"), 1) if ps.get("n") else "—",
+             ("vota (padrão real, t = " + f"{ps.get('t_stat', 0):.1f})".replace(".", ",")) if ps.get("fator", 0) > 0 else "não vota (não provou vantagem)",
+             "ok" if ps.get("fator", 0) > 0 else "alerta"),
+            ("🔮 ÍRIS · 1 MÊS", pct(val_iris.get("acerto"), 1) if val_iris.get("n") else "—",
+             f"chute 'sempre sobe' = {pct(val_iris.get('chute_alta'), 1)}", "ok" if pv_iris.get("fator", 0) > 0 else "alerta"),
+            ("🧠 EQUIPE · PLACAR REAL", pct(float(eq["acerto"].iloc[0]), 0) if len(eq) else "—",
+             f"{int(eq['conferidos'].iloc[0])} decisões conferidas 3 meses depois" if len(eq) else "começa a contar 3 meses após a 1ª apuração real", ""),
+        ])
+
+        st.markdown("#### 🎯 As ações que estamos para comprar — o que cada previsor diz")
+        so_compras = st.toggle("Só as recomendadas e a minha carteira", value=True, key="prev_so_compras")
+        base_prev = rk[rk["sinal"].isin(["Comprar", "Acumular"]) | rk["ticker"].isin(cart["ticker"])] if so_compras else rk
+        if base_prev.empty:
+            st.info("Hoje nenhuma ação está com sinal de compra. Desligue o filtro acima para ver as previsões de todas.")
+        else:
+            tp = base_prev.copy()
+            tp["dy_otto"] = tp["otto_prov_12m"] / tp["preco"]
+            tp["faixa"] = [f"{brl(a)} a {brl(b)}" if a == a and b == b else "—" for a, b in zip(tp["otto_prov_p10"], tp["otto_prov_p90"])]
+            tp["renda_previsivel"] = (tp["otto_acerto"].fillna(0) * (1 - tp["otto_prob_corte"].fillna(1)) * 100).round(0)
+            tp["sinal_txt"] = tp["sinal"].map(lambda x: f"{COR_SINAL.get(x, '')} {x}")
+            for c in ("otto_prob_corte", "otto_acerto", "bento_prob_tocar_teto", "sofia_prob", "prob_alta_1m"):
+                if c not in tp:
+                    tp[c] = np.nan
+                tp[c + "_pct"] = tp[c] * 100
+            cols = ["ticker", "sinal_txt", "preco", "renda_previsivel", "otto_prov_12m", "faixa", "dy_otto", "otto_prob_corte_pct",
+                    "otto_acerto_pct", "bento_preco_80", "bento_preco_50", "bento_prob_tocar_teto_pct", "sofia_prob_pct", "prob_alta_1m_pct"]
+            tp["dy_otto"] = tp["dy_otto"] * 100
+            st.dataframe(tp[cols].sort_values("renda_previsivel", ascending=False), hide_index=True, width="stretch",
+                         column_config={
+                             "ticker": st.column_config.TextColumn("Ação"),
+                             "sinal_txt": st.column_config.TextColumn("Sinal"),
+                             "preco": col_rs("Preço"),
+                             "renda_previsivel": st.column_config.ProgressColumn("Renda previsível", min_value=0, max_value=100, format="%.0f",
+                                                                                 help="Acerto do Otto no passado × (1 − chance de corte). Quanto maior, mais dá para contar com essa renda."),
+                             "otto_prov_12m": col_rs("💵 Proventos 12m", "Previsão do Otto por ação para os próximos 12 meses."),
+                             "faixa": st.column_config.TextColumn("Faixa provável", help="De 10% a 90%: pelo tamanho dos erros do método no passado."),
+                             "dy_otto": st.column_config.NumberColumn("Rende (%)", format="%.1f", help="Proventos previstos ÷ preço de hoje."),
+                             "otto_prob_corte_pct": st.column_config.ProgressColumn("Risco de corte", min_value=0, max_value=100, format="%.0f%%"),
+                             "otto_acerto_pct": st.column_config.NumberColumn("Otto acertou (%)", format="%.0f",
+                                                                              help="Nos últimos anos, quantas vezes o real ficou a ±25% do que o método previa."),
+                             "bento_preco_80": col_rs("🎯 Ordem 80%", "Preço de compra com ~80% de chance de executar em 1 mês."),
+                             "bento_preco_50": col_rs("🎯 Ordem 50%", "Mais barato, mas só ~50% de chance de executar em 1 mês."),
+                             "bento_prob_tocar_teto_pct": st.column_config.NumberColumn("Chega no teto? (%)", format="%.0f",
+                                                                                        help="Chance de o preço chegar ao preço-teto no próximo mês (100 = já está abaixo)."),
+                             "sofia_prob_pct": st.column_config.NumberColumn("🧮 Sofia (%)", format="%.0f",
+                                                                            help="Chance de render mais que a mediana das ações em 3 meses (já ajustada pelo acerto dela no teste)."),
+                             "prob_alta_1m_pct": st.column_config.NumberColumn("🔮 Íris (%)", format="%.0f", help="Chance de subir no próximo mês."),
+                         })
+            st.caption("Como usar: para **renda**, priorize *Renda previsível* alta e *Risco de corte* baixo. Para **comprar mais barato**, "
+                       "ponha a ordem limitada no preço do Bento (80% = quase certo de executar; 50% = mais barato, pode não executar).")
+
+        with st.expander("🧮 O que a Sofia aprendeu com os dados"):
+            pesos = ps.get("pesos") or {}
+            if pesos:
+                dfp = pd.DataFrame({"sinal": list(pesos), "peso": list(pesos.values())})
+                st.altair_chart(alt.Chart(dfp).mark_bar().encode(
+                    x=alt.X("peso:Q", title="Influência (positivo = ajuda a render mais)"), y=alt.Y("sinal:N", sort="-x", title=None),
+                    color=alt.condition("datum.peso > 0", alt.value(visual.VERDE), alt.value(visual.VERMELHO))).properties(height=200), width="stretch")
+                st.caption(f"Teste sem colar em {ps.get('meses', 0)} meses: acerto {pct(ps.get('acerto'), 1)} (chute = 50%). "
+                           f"As 20% que ela mais gostava renderam, em média, {pct(ps.get('spread_3m'), 1)} a mais em 3 meses que as 20% que menos gostava.")
+        with st.expander("❓ Por que nenhum previsor promete 100%"):
+            st.markdown("""
+- **Proventos são a parte mais previsível** do mercado: boas pagadoras mudam pouco de um ano para o outro. Por isso o Otto tem o maior peso
+  da equipe de previsão — ele é o coração do projeto de dividendos.
+- **Preço de curto prazo é quase aleatório.** Íris e Sofia procuram pequenas vantagens estatísticas; quando o teste mostra que não há
+  vantagem, elas ficam neutras em vez de inventar.
+- **O Bento não adivinha o futuro**: ele mede quanto a ação costuma oscilar e diz o preço com 80% ou 50% de chance de execução —
+  e o teste mostra se essas chances se confirmam.
+- O placar real (🧠 Equipe) compara as decisões com o que aconteceu de verdade 3 meses depois. É ele que diz, com o tempo, o quanto confiar.
+""")
+
+
+# ======================================================================= SALA DOS AGENTES
+with abas[3]:
     @st.fragment(run_every=20)
     def _sala_ao_vivo():
         """Atualiza sozinho a cada 20 s: dá para ver a equipe trabalhando enquanto o agente roda."""
@@ -384,7 +478,7 @@ with abas[2]:
     else:
         hora_m = pd.Timestamp(M.get("hora") or R["data"])
         st.markdown(md(
-            "Sete especialistas analisam **todas** as ações, cada um pelo seu ângulo, e votam de −2 a +2. Depois, "
+            "Dez especialistas analisam **todas** as ações, cada um pelo seu ângulo, e votam de −2 a +2 (o Bento não vota: ele dá o preço de entrada). Depois, "
             "**um confere o trabalho do outro** (verificação cruzada) e o AURUM só recomenda compra quando a nota do sistema "
             "**e** a equipe concordam (dupla checagem)." + (" Hoje os especialistas também foram revisados por IA." if M.get("ia") else "")))
         ops_all = M["opinioes"]
@@ -524,7 +618,7 @@ with abas[2]:
                        "Cada previsão diária é registrada e conferida 1 mês depois — o placar real aparece acima.")
 
 # ======================================================================= HOJE
-with abas[3]:
+with abas[4]:
     st.subheader(f"Este mês, com {brl(pl['aporte_mensal'])} de aporte, compre:")
     compras, sobra = aporte.sugerir(rk, pl["aporte_mensal"], cart)
     if compras.empty:
@@ -611,7 +705,7 @@ with abas[3]:
         st.caption(f"+ {len(imp) - 8} alertas na aba 🔔 Alertas.")
 
 # ======================================================================= AGENDA
-with abas[4]:
+with abas[5]:
     st.subheader("📅 Quanto você deve receber nos próximos 12 meses")
     compras_ag, _ = aporte.sugerir(rk, pl["aporte_mensal"], cart)
     atual = dict(zip(cart["ticker"], cart["quantidade"])) if len(cart) else {}
@@ -648,7 +742,7 @@ with abas[4]:
                    "Use isto para encaixar compras que você já ia fazer.")
 
 # ======================================================================= META
-with abas[5]:
+with abas[6]:
     st.subheader("🎯 Quanto tempo até a sua meta — e o que te leva mais rápido")
     st.caption("O sistema simula 5.000 futuros possíveis para a bolsa (anos bons e ruins, na proporção do passado) "
                "e mostra a CHANCE de você chegar até cada ano. Ninguém consegue prometer uma data exata.")
@@ -730,7 +824,7 @@ with abas[5]:
                  hide_index=True, width="stretch")
 
 # ======================================================================= RANKING
-with abas[6]:
+with abas[7]:
     st.caption("Todas as ações acompanhadas, da melhor para a pior para quem quer **renda + patrimônio no longo prazo**. "
                "Passe o mouse no título de cada coluna para ver o que significa.")
     f1, f2, f3 = st.columns([2, 2, 1])
@@ -784,7 +878,7 @@ with abas[6]:
         st.caption(f"Sem dados nesta apuração (código pode ter mudado na B3): {', '.join(R['sem_dados'])}")
 
 # ======================================================================= EMPRESA
-with abas[7]:
+with abas[8]:
     nomes = rk.set_index("ticker")["nome"]
     t = st.selectbox("Escolha a empresa", rk["ticker"], format_func=lambda x: f"{x} — {nomes[x]}")
     r = rk.set_index("ticker").loc[t]
@@ -906,7 +1000,7 @@ with abas[7]:
                      hide_index=True, width="stretch")
 
 # ======================================================================= CARTEIRA
-with abas[8]:
+with abas[9]:
     st.markdown("**Minha carteira** — digite as ações que você já tem e clique em Salvar. "
                 "O aporte do mês passa a completar o que está abaixo do alvo, e os alertas acompanham as suas ações.")
     base_cart = cart if not cart.empty else pd.DataFrame({"ticker": pd.Series(dtype=str), "quantidade": pd.Series(dtype=float),
@@ -936,7 +1030,7 @@ with abas[8]:
         st.caption("'Evitar' numa ação que você já tem não é ordem de venda: é um sinal para olhar as notícias e os resultados.")
 
 # ======================================================================= BACKTEST
-with abas[9]:
+with abas[10]:
     bt = R.get("backtest")
     st.subheader("🧪 E se você tivesse seguido o sistema nos últimos 5 anos?")
     if not bt:
@@ -970,7 +1064,7 @@ with abas[9]:
             st.dataframe(bt["compras"].iloc[::-1], hide_index=True, width="stretch")
 
 # ======================================================================= ALERTAS
-with abas[10]:
+with abas[11]:
     if not R["alertas"]:
         st.success("Nenhum alerta hoje.")
     icones = {"Oportunidade": "🟢", "Queda forte": "📉", "Provento": "💰", "Data-com": "📅", "Ranking": "🏆",
@@ -982,7 +1076,7 @@ with abas[10]:
             (st.warning if a["nivel"] == 1 else st.info)(md(f"{icones.get(a['tipo'], '•')} **{a['tipo']}** — {a['texto']}"))
 
 # ======================================================================= COMO FUNCIONA
-with abas[11]:
+with abas[12]:
     st.markdown("""
 ### De onde vêm os dados (todos reais e atualizados a cada apuração)
 - **Cotações, proventos (dividendos + JCP) e balanço**: Yahoo Finance. A data da última cotação aparece no topo.
